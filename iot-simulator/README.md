@@ -1,13 +1,13 @@
-# IoT Simulator
+# IoT Simulator (Sprint 1 Stub — Phụ trách: HẢI)
 
-Thư mục này chứa khung mô phỏng máy bán hàng để hỗ trợ phát triển backend trước
-khi tích hợp phần cứng thật.
-
-## Phạm vi Sprint 1
-
-- Khởi chạy được simulator theo công nghệ nhóm thống nhất.
-- Tạo hoặc gửi trạng thái máy mẫu theo định dạng được backend chấp nhận.
-- Ghi rõ cách chạy, cấu hình và ví dụ payload.
-
-Sprint 1 chưa yêu cầu MQTT hoàn chỉnh, điều khiển servo/motor hoặc quy trình nhả
-hàng. Không tự đặt tên trường/payload khác với hợp đồng tích hợp mà nhóm đã chốt.
+## 1. Định dạng bản tin giả lập chuẩn (JSON)
+```json
+{
+  "machineCode": "VM001",
+  "machineState": "IDLE",
+  "temperature": 4.6,
+  "humidity": 68.5,
+  "doorStatus": "CLOSED",
+  "sensorStatus": "OK",
+  "timestamp": "2026-11-01T08:30:00Z"
+}
