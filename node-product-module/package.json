@@ -1,0 +1,22 @@
+{
+  "name": "freshvend-product-module",
+  "version": "0.0.1",
+  "description": "Product & Category API (Sprint 1) - FreshVend",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --env-file=.env src/server.js",
+    "dev": "node --env-file=.env --watch src/server.js",
+    "test": "node --env-file=.env --test"
+  },
+  "engines": {
+    "node": ">=20.6"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "supertest": "^7.0.0"
+  }
+}
