@@ -5,3 +5,4 @@ và ví dụ lỗi. Tài liệu phải được cập nhật cùng lúc khi hợ
 
 Các API dự kiến trong Sprint 1: đăng nhập, danh mục/sản phẩm, tồn kho và thông
 tin máy/trạng thái cơ bản.
+Sprint 2 Product/Order/Payment API (Nghĩa): [sprint2-nghia.md](sprint2-nghia.md).

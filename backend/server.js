@@ -32,7 +32,7 @@ async function start() {
     console.error('   1. PostgreSQL có đang chạy không?');
     console.error('      → Mở DBeaver, thử kết nối lại.');
     console.error('   2. DATABASE_URL trong file .env có đúng không?');
-    console.error(`      → Hiện tại: ${process.env.DATABASE_URL || '(chưa cấu hình)'}`);
+    console.error('      DATABASE_URL configured:', Boolean(process.env.DATABASE_URL));
     console.error('   3. Database "FreshVend" đã được tạo và import SQL chưa?');
     console.error('      → Xem: database/migrations/dump-FreshVend-202611011643.sql');
     console.error('!'.repeat(55) + '\n');
