@@ -29,11 +29,13 @@ app.get('/health', async (req, res, next) => {
 });
 
 // ── Routes Sprint 1 ───────────────────────────────────────────────────────────
-// Bỏ comment khi module tương ứng đã hoàn thành:
-// app.use('/api/auth',      require('./src/modules/auth/routes'));
-// app.use('/api/products',  require('./src/modules/products/routes'));
-// app.use('/api/inventory', require('./src/modules/inventory/routes'));
-// app.use('/api/machines',  require('./src/modules/machines/routes'));
+app.use('/api/auth',      require('./src/router/auth.router'));
+app.use('/api/inventory', require('./src/router/inventory.router'));
+app.use('/api/machines',  require('./src/modules/machines/machine.router'));
+
+// ── Products & Categories (Nghĩa - Sprint 1) ─────────────────────────────────
+app.use('/api/products',   require('./src/modules/products/product.routes'));
+app.use('/api/categories', require('./src/modules/products/category.routes'));
 
 // ── 404 — route không tồn tại ────────────────────────────────────────────────
 app.use((req, res) => {
@@ -47,4 +49,3 @@ app.use((req, res) => {
 app.use(errorHandler);
 
 module.exports = app;
-

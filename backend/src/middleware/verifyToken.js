@@ -1,6 +1,6 @@
 const jwt = require("jsonwebtoken");
 
-const SECRET_KEY = process.env.JWT_SECRET || "day_la_secret_key_demo_nen_doi_trong_thuc_te";
+const SECRET_KEY = process.env.JWT_SECRET || "freshvend_dev_secret_change_in_production";
 
 const verifyToken = (req, res, next) => {
     // Client phải gửi header: Authorization: Bearer <token>

@@ -1,0 +1,63 @@
+const assert = require('node:assert/strict');
+const { after, describe, it } = require('node:test');
+const request = require('supertest');
+
+require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
+
+const app = require('../app');
+const { pool } = require('../src/config/db');
+
+const MACHINE_ID = '8fd61456-cef0-497a-8a4a-b88aa3aee00c';
+const UNKNOWN_ID = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+const hasDatabase = Boolean(process.env.DATABASE_URL);
+
+after(() => pool.end());
+
+describe('Machines API', () => {
+  it('lists machines', { skip: !hasDatabase }, async () => {
+    const res = await request(app).get('/api/machines').expect(200);
+    assert.ok(Array.isArray(res.body.data));
+  });
+
+  it('returns a machine and its slots by UUID', { skip: !hasDatabase }, async () => {
+    const res = await request(app).get(`/api/machines/${MACHINE_ID}`).expect(200);
+    assert.equal(res.body.data.id, MACHINE_ID);
+    assert.ok(Array.isArray(res.body.data.slots));
+  });
+
+  it('lists slots for a machine', { skip: !hasDatabase }, async () => {
+    const res = await request(app).get(`/api/machines/${MACHINE_ID}/slots`).expect(200);
+    assert.ok(Array.isArray(res.body.data));
+  });
+
+  it('rejects a malformed machine UUID', async () => {
+    const res = await request(app).get('/api/machines/not-a-uuid').expect(400);
+    assert.equal(res.body.errorCode, 'INVALID_MACHINE_ID');
+  });
+
+  it('returns 404 for an unknown machine UUID', { skip: !hasDatabase }, async () => {
+    const res = await request(app).get(`/api/machines/${UNKNOWN_ID}`).expect(404);
+    assert.equal(res.body.errorCode, 'MACHINE_NOT_FOUND');
+  });
+
+  it('accepts simulator telemetry for the seeded machine', { skip: !hasDatabase }, async () => {
+    const req = request(app)
+      .post('/api/machines/simulator/status')
+      .send({
+        machineCode: 'VM001',
+        machineState: 'IDLE',
+        temperature: 4.6,
+        humidity: 65,
+        doorStatus: 'CLOSED',
+        sensorStatus: 'OK',
+      });
+
+    if (process.env.IOT_DEVICE_SECRET) {
+      req.set('x-iot-key', process.env.IOT_DEVICE_SECRET);
+    }
+
+    const res = await req.expect(200);
+    assert.equal(res.body.data.machineCode, 'VM001');
+    assert.equal(res.body.data.operationStatus, 'IDLE');
+  });
+});
