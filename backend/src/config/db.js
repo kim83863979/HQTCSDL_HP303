@@ -55,7 +55,7 @@ async function checkConnection() {
       'SELECT NOW() AS now, current_database() AS db'
     );
     const { db, now } = result.rows[0];
-    console.log('[DB] ✅ Connected to PostgreSQL');
+    console.log('[DB]  Connected to PostgreSQL');
     console.log(`[DB]    Database   : ${db}`);
     console.log(`[DB]    Server time: ${now}`);
   } finally {
