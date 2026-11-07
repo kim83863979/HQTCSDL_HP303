@@ -321,6 +321,9 @@ DO $$ BEGIN
       CHECK (subtotal = quantity * unit_price);
   END IF;
 END $$;
+-- The base dump enforced one payment per order. Sprint 2 permits multiple attempts,
+-- while still limiting each order to one pending and one successful attempt.
+ALTER TABLE public.payments DROP CONSTRAINT IF EXISTS uq_payment_order;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_one_pending_per_order
   ON public.payments (order_id) WHERE payment_status = 'PENDING';
 CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_one_success_per_order
