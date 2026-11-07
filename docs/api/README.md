@@ -16,7 +16,7 @@ Sprint 2 Order/Payment details: [sprint2-nghia.md](sprint2-nghia.md).
 
 Register accepts `email`, `fullname`, and `password`; the default role is `OPERATOR`. Login accepts `email` and `password` and returns a JWT. IoT telemetry accepts machine state, temperature, humidity, door, and sensor data; use `x-iot-key` when `IOT_DEVICE_SECRET` is configured.
 
-The order-expiration endpoint requires `x-order-maintenance-key` matching `ORDER_MAINTENANCE_SECRET`. Payment callbacks require `x-payment-key` matching `PAYMENT_WEBHOOK_SECRET`. These secrets belong in the local root `.env`, which must not be committed.
+The order-expiration endpoint requires `x-order-maintenance-key` matching `ORDER_MAINTENANCE_SECRET`. Payment callbacks require `x-payment-key` matching `PAYMENT_WEBHOOK_SECRET`. These secrets belong in the local root `.env`, which must not be committed. Copy root `.env.example` to `.env` and replace the placeholders.
 
 Postman collections:
 

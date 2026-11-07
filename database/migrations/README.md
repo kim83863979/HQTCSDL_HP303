@@ -1,8 +1,5 @@
 # Database migrations
 
-Đặt migration tạo và cập nhật schema tại đây theo đúng ERD đã được nhóm chốt.
-Mỗi migration cần có thứ tự rõ ràng, có thể áp dụng trên database mới và được
-kiểm tra cùng backend trước khi tích hợp.
+Apply schema changes in version order. Start with `migrations/dump-FreshVend-202611011643.sql`, then apply `migrations/20261107020000_order_payment_reservations.sql` for the Sprint 2 order and payment flow.
 
-Không sửa migration đã được các thành viên khác dùng chung; tạo migration mới
-cho thay đổi tiếp theo.
+The Sprint 2 migration adds `inventories.reserved_quantity`, `orders.expires_at`, `order_items.slot_id`, and `inventory_reservations`, with reservation lifecycle triggers and constraints. Keep local credentials in the ignored root `.env`; never commit them.

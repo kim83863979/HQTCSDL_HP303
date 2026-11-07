@@ -1,7 +1,5 @@
-# Payment API — Sprint 2 (Nghĩa)
+# Payments module
 
-- `POST /api/payments`: tạo payment PENDING từ order PENDING; amount được lấy từ total_amount của order.
-- `GET /api/payments/:paymentId`: tra cứu thanh toán.
-- `POST /api/payments/:paymentId/result`: callback mô phỏng; nhận paymentStatus SUCCESS/FAILED và transactionReference tùy chọn. Cập nhật payment và trạng thái order trong cùng transaction; lặp lại cùng kết quả không cập nhật lần hai.
+Payment attempts are created from PENDING orders. Each retry after FAILED creates a new attempt and re-reserves stock if available. The mock callback accepts SUCCESS, FAILED, and REFUNDED, and requires the configured `x-payment-key` secret. It does not connect to a real payment gateway or issue refunds.
 
-Callback này dùng cho demo tích hợp, chưa thay cổng thanh toán thật. Phần giữ/trừ/giải phóng tồn kho cần được nối với module Inventory; middleware đăng nhập/phân quyền cần được gắn khi tích hợp auth của nhóm.
+See `docs/api/sprint2-nghia.md` for endpoint details and state transitions.

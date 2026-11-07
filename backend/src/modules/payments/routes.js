@@ -1,33 +1,41 @@
 const express = require('express');
 const service = require('./service');
+const verifySecret = require('../../shared/verifySecret');
 
 const router = express.Router();
+const verifyPaymentWebhook = verifySecret('PAYMENT_WEBHOOK_SECRET', 'x-payment-key');
 
 router.post('/', async (req, res, next) => {
   try {
     const result = await service.createPayment(req.body);
-    return res.status(result.created ? 201 : 200).json({ success: true, data: result.payment });
+    res.status(result.created ? 201 : 200).json({ success: true, data: result.payment, created: result.created });
   } catch (error) {
-    return next(error);
+    next(error);
   }
 });
 
 router.get('/:paymentId', async (req, res, next) => {
   try {
-    const payment = await service.getPaymentById(req.params.paymentId);
-    return res.json({ success: true, data: payment });
+    res.json({ success: true, data: await service.getPaymentById(req.params.paymentId) });
   } catch (error) {
-    return next(error);
+    next(error);
   }
 });
 
-// Endpoint mô phỏng callback của cổng thanh toán cho demo Sprint 2.
-router.post('/:paymentId/result', async (req, res, next) => {
+router.post('/:paymentId/callback', verifyPaymentWebhook, async (req, res, next) => {
   try {
-    const result = await service.setPaymentResult(req.params.paymentId, req.body);
-    return res.json({ success: true, data: result });
+    res.json({ success: true, data: await service.setPaymentResult(req.params.paymentId, req.body) });
   } catch (error) {
-    return next(error);
+    next(error);
+  }
+});
+
+// Backward-compatible path for the first Sprint 2 draft; it uses the same authenticated callback logic.
+router.post('/:paymentId/result', verifyPaymentWebhook, async (req, res, next) => {
+  try {
+    res.json({ success: true, data: await service.setPaymentResult(req.params.paymentId, req.body) });
+  } catch (error) {
+    next(error);
   }
 });
 

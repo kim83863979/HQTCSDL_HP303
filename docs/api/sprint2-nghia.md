@@ -1,60 +1,56 @@
-# FreshVend — API Sprint 2 (Nghĩa)
+# FreshVend Order and Payment API (Sprint 2)
 
-Base URL local: `http://localhost:3000`
+Base URL: `http://localhost:3000`
 
-## Sản phẩm
+Apply `database/migrations/dump-FreshVend-202611011643.sql` first, then `database/migrations/20261107020000_order_payment_reservations.sql`.
 
-### `GET /api/products`
-
-Lấy sản phẩm đang bán, có phân trang:
-- Query tùy chọn: `page` (mặc định 1), `limit` (mặc định 20, tối đa 100), `categoryId` (UUID).
-- Ví dụ: `GET /api/products?page=1&limit=20`
-
-### `GET /api/products/:productId`
-
-Lấy chi tiết một sản phẩm đang bán. ID sai định dạng trả 400; không tồn tại/không bán trả 404.
-
-## Đơn hàng
+## Orders
 
 ### `POST /api/orders`
 
-Body:
+Creates a PENDING order and reserves stock in one database transaction. The server reads current product prices; clients must provide a machine, product, slot, and quantity for each item.
+
 ```json
 {
-  "machineId": "<UUID máy ACTIVE>",
+  "machineId": "<machine UUID>",
   "items": [
-    { "productId": "<UUID sản phẩm ACTIVE>", "quantity": 2 }
+    { "productId": "<product UUID>", "slotId": "<slot UUID>", "quantity": 2 }
   ]
 }
 ```
 
-Server tự đọc giá từ database, tính subtotal/tổng tiền và tạo order cùng order_items trong một transaction. Đơn mới có trạng thái `PENDING`. Máy, sản phẩm và tồn ở khe ACTIVE của máy được kiểm tra trước khi tạo.
+The slot must be ACTIVE, contain that product, and belong to the selected machine. Available quantity is `inventories.quantity - inventories.reserved_quantity`. Orders expire 15 minutes after creation.
 
 ### `GET /api/orders/:orderId`
 
-Trả đơn, các Order Item và payment (nếu có).
+Returns the order, its items, reservation history, and payment attempts. Reading an expired PENDING order marks it CANCELLED and releases active reservations.
 
-## Thanh toán
+### `POST /api/orders/:orderId/cancel`
+
+Cancels a PENDING order, releases RESERVED inventory, and marks any PENDING payment attempts FAILED. Other order statuses return 409.
+
+### `POST /api/orders/expire`
+
+Cancels all expired PENDING orders. No scheduler is included; an external job may call this endpoint with header `x-order-maintenance-key` set to the local `ORDER_MAINTENANCE_SECRET`.
+
+### `POST /api/orders/:orderId/dispense-result`
+
+Body: `{ "success": true }` or `{ "success": false, "errorMessage": "..." }`. A PAID order becomes DISPENSING, then COMPLETED on success or FAILED on failure. The database changes consumed reservations to RESTOCKED and restores the stock counter on dispense failure. A configured `IOT_DEVICE_SECRET` may also require `x-iot-key`.
+
+## Payments
 
 ### `POST /api/payments`
 
-Body:
-```json
-{
-  "orderId": "<UUID đơn PENDING>",
-  "paymentMethod": "QR"
-}
-```
-
-Số tiền lấy từ `orders.total_amount`, client không tự gửi amount.
+Body: `{ "orderId": "<order UUID>", "paymentMethod": "QR" }`. The amount comes from the order. Only one PENDING payment attempt is allowed per order. Retrying after FAILED creates a new reservation if stock remains and then creates a new payment attempt. A matching request while a payment remains PENDING returns that attempt.
 
 ### `GET /api/payments/:paymentId`
 
-Tra cứu thanh toán.
+Returns one payment attempt.
 
-### `POST /api/payments/:paymentId/result`
+### `POST /api/payments/:paymentId/callback`
 
-Endpoint callback mô phỏng cho bài tập; body ví dụ:
+The mock callback requires `x-payment-key` set to the local `PAYMENT_WEBHOOK_SECRET`. Body:
+
 ```json
 {
   "paymentStatus": "SUCCESS",
@@ -62,10 +58,10 @@ Endpoint callback mô phỏng cho bài tập; body ví dụ:
 }
 ```
 
-`paymentStatus` nhận `SUCCESS` hoặc `FAILED`. Cập nhật payment và order trong cùng transaction; gửi lại cùng kết quả không cập nhật lần hai. Endpoint này mô phỏng callback, chưa phải cổng thanh toán thật.
+Accepted statuses: `SUCCESS`, `FAILED`, `REFUNDED`. SUCCESS consumes reserved stock and marks the order PAID. FAILED releases the reservation and leaves the order PENDING for retry until it expires. REFUNDED is allowed only after SUCCESS and records the gateway result; this API does not issue a real refund. Repeating the same callback is idempotent; a conflicting transaction reference or invalid/late transition returns 409.
 
-## Ranh giới cần tích hợp
+`POST /api/payments/:paymentId/result` remains as a backwards-compatible alias and uses the same authentication and rules.
 
-- API tạo đơn kiểm tra tồn nhưng chưa giữ/trừ hàng; cần nối với Inventory để tránh bán vượt số lượng và xử lý hàng đã giữ khi payment thất bại/hủy.
-- Schema hiện chưa lưu `user_id` trên `orders`; chưa thể giới hạn GET order theo khách hàng.
-- Middleware đăng nhập/phân quyền cần được gắn khi tích hợp auth của nhóm.
+## Local configuration and sample data
+
+Keep `PAYMENT_WEBHOOK_SECRET` and `ORDER_MAINTENANCE_SECRET` in the ignored root `.env`; do not commit secret values. The current dump includes machine `8fd61456-cef0-497a-8a4a-b88aa3aee00c` (VM001). Example product/slot pairs: product `f88b5118-a85a-4488-b7ec-8d8b20d78b96` in slot `b120647d-32f6-4f5f-809c-695564b25a6b`; product `3575e93f-8458-4bb2-923b-1de5cfc8a8cf` in slot `2935c1a4-de18-4c31-bf7c-4f1d2051ee8b`; product `f9f599ea-be8e-45bd-b341-6addd5930ff8` in slot `fbf0da53-6435-4f12-b948-4ce0ce85613b`. These pairs match the current SQL dump; use a slot that contains the selected product.
