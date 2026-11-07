@@ -1,7 +1,3 @@
-// app.js
-// Khởi tạo Express application, đăng ký middleware và router.
-// Không chứa logic khởi động server (xem server.js).
-
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 
 const express = require('express');
@@ -9,41 +5,32 @@ const errorHandler = require('./src/middleware/errorHandler');
 const { checkConnection } = require('./src/config/db');
 
 const app = express();
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
-// ── Middleware toàn cục ───────────────────────────────────────────────────────
-app.use(express.json());           // parse JSON request body
-app.use(express.urlencoded({ extended: false })); // parse form data
-
-// ── Health-check (dùng để kiểm tra server + DB còn sống không) ───────────────
 app.get('/health', async (req, res, next) => {
   try {
     await checkConnection();
-    res.json({
-      status: 'ok',
-      database: 'connected',
-      timestamp: new Date().toISOString(),
-    });
+    res.json({ status: 'ok', database: 'connected', timestamp: new Date().toISOString() });
   } catch (err) {
-    next(err); // chuyển sang errorHandler → trả 503
+    next(err);
   }
 });
 
-// ── API modules ─────────────────────────────────────────────────────────────
-app.use('/api/products', require('./src/modules/products/routes'));
-app.use('/api/categories', require('./src/modules/categories/routes'));
+app.use('/api/auth', require('./src/router/auth.router'));
+app.use('/api/inventory', require('./src/router/inventory.router'));
+app.use('/api/machines', require('./src/modules/machines/machine.router'));
+app.use('/api/products', require('./src/modules/products/product.routes'));
+app.use('/api/categories', require('./src/modules/products/category.routes'));
 app.use('/api/orders', require('./src/modules/orders/routes'));
 app.use('/api/payments', require('./src/modules/payments/routes'));
 
-// ── 404 — route không tồn tại ────────────────────────────────────────────────
 app.use((req, res) => {
   res.status(404).json({
     error: 'Not Found',
-    message: `Route '${req.method} ${req.path}' không tồn tại.`,
+    message: `Route '${req.method} ${req.path}' khong ton tai.`,
   });
 });
-
-// ── Error handler — PHẢI là middleware cuối cùng ──────────────────────────────
 app.use(errorHandler);
 
 module.exports = app;
-
