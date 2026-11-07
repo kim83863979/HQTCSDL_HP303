@@ -1,33 +1,77 @@
 
-const { sequelize } = require("../../../model");
+const { getClient } = require("../../../config/db");
 const inventoryRepository = require("../repository/inventory.repository");
 
-// Tạo lỗi có HTTP status code
+const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Kiểm tra UUID
+const requireUuid = (id, label) => {
+    if (!id || !UUID_RE.test(id)) {
+        const error = new Error(`${label} must be a valid UUID`);
+        error.statusCode = 400;
+        error.status = 400;
+        throw error;
+    }
+};
+
+// Tạo lỗi có HTTP status
 const createError = (message, statusCode = 400) => {
     const error = new Error(message);
     error.statusCode = statusCode;
+    error.status = statusCode;
     return error;
 };
 
+// Chạy transaction PostgreSQL
+const withTransaction = async (callback) => {
+    const client = await getClient();
+
+    try {
+        await client.query("BEGIN");
+
+        const result = await callback(client);
+
+        await client.query("COMMIT");
+        return result;
+    } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    } finally {
+        client.release();
+    }
+};
+
 class InventoryService {
+
     // ==========================================
     // SPRINT 1: TRUY VẤN TỒN KHO
     // ==========================================
 
     async getInventoryByMachine(machineId) {
-        if (!machineId) {
-            throw createError("Machine ID is required");
+        requireUuid(machineId, "Machine ID");
+
+        const result =
+            await inventoryRepository.getInventoryByMachine(machineId);
+
+        if (result.length === 0 || !result[0].machine_id) {
+            throw createError("Machine not found", 404);
         }
 
-        return await inventoryRepository.getInventoryByMachine(machineId);
+        return result;
     }
 
     async getInventoryBySlot(slotId) {
-        if (!slotId) {
-            throw createError("Slot ID is required");
+        requireUuid(slotId, "Slot ID");
+
+        const result =
+            await inventoryRepository.getInventoryBySlot(slotId);
+
+        if (result.length === 0 || !result[0].slot_id) {
+            throw createError("Slot not found", 404);
         }
 
-        return await inventoryRepository.getInventoryBySlot(slotId);
+        return result;
     }
 
     // ==========================================
@@ -35,9 +79,8 @@ class InventoryService {
     // ==========================================
 
     async checkAvailability(slotId, productId, requestedQuantity) {
-        if (!slotId || !productId) {
-            throw createError("Slot ID and Product ID are required");
-        }
+        requireUuid(slotId, "Slot ID");
+        requireUuid(productId, "Product ID");
 
         const quantity = Number(requestedQuantity);
 
@@ -45,34 +88,35 @@ class InventoryService {
             throw createError("Quantity must be a positive integer");
         }
 
-        return await sequelize.transaction(async (transaction) => {
-            const inventory = await inventoryRepository.getInventoryForUpdate(
-                slotId,
-                productId,
-                transaction
-            );
+        return withTransaction(async (client) => {
+            const inventory =
+                await inventoryRepository.getInventoryForUpdate(
+                    slotId,
+                    productId,
+                    client
+                );
 
             if (!inventory) {
                 throw createError("Inventory not found", 404);
             }
 
             if (inventory.slot_status !== "ACTIVE") {
-                throw createError("Slot is not active", 400);
+                throw createError("Slot is not active");
             }
 
             if (inventory.product_status !== "ACTIVE") {
-                throw createError("Product is not active", 400);
+                throw createError("Product is not active");
             }
 
             const availableQuantity =
-                inventory.quantity - inventory.reserved_quantity;
+                Number(inventory.available_quantity);
 
             return {
                 inventoryId: inventory.inventory_id,
                 slotId: inventory.slot_id,
                 productId: inventory.product_id,
-                quantity: inventory.quantity,
-                reservedQuantity: inventory.reserved_quantity,
+                quantity: Number(inventory.quantity),
+                reservedQuantity: Number(inventory.reserved_quantity),
                 availableQuantity,
                 requestedQuantity: quantity,
                 isAvailable: availableQuantity >= quantity
@@ -84,12 +128,15 @@ class InventoryService {
     // SPRINT 2: GIỮ HÀNG KHI TẠO ORDER ITEM
     // ==========================================
 
-    async reserveInventory(orderItemId, slotId, productId, requestedQuantity) {
-        if (!orderItemId || !slotId || !productId) {
-            throw createError(
-                "Order Item ID, Slot ID and Product ID are required"
-            );
-        }
+    async reserveInventory(
+        orderItemId,
+        slotId,
+        productId,
+        requestedQuantity
+    ) {
+        requireUuid(orderItemId, "Order Item ID");
+        requireUuid(slotId, "Slot ID");
+        requireUuid(productId, "Product ID");
 
         const quantity = Number(requestedQuantity);
 
@@ -98,13 +145,14 @@ class InventoryService {
         }
 
         try {
-            return await sequelize.transaction(async (transaction) => {
-                // Khóa dòng tồn kho để tránh giữ hàng vượt số lượng
+            return await withTransaction(async (client) => {
+
+                // Khóa dòng inventory để tránh giữ hàng vượt tồn kho
                 const inventory =
                     await inventoryRepository.getInventoryForUpdate(
                         slotId,
                         productId,
-                        transaction
+                        client
                     );
 
                 if (!inventory) {
@@ -120,7 +168,7 @@ class InventoryService {
                 }
 
                 const availableQuantity =
-                    inventory.quantity - inventory.reserved_quantity;
+                    Number(inventory.available_quantity);
 
                 if (availableQuantity < quantity) {
                     throw createError(
@@ -129,35 +177,33 @@ class InventoryService {
                     );
                 }
 
-                // Tăng số lượng hàng đang được giữ
-                const updatedInventory =
-                    await inventoryRepository.increaseReservedQuantity(
-                        inventory.inventory_id,
-                        quantity,
-                        transaction
-                    );
-
-                if (!updatedInventory) {
-                    throw createError("Unable to reserve inventory", 409);
-                }
-
-                // Tạo reservation gắn với order item
+                // Tạo reservation.
+                // Không cập nhật inventories.quantity tại bước giữ hàng.
                 const reservation =
                     await inventoryRepository.createReservation(
                         orderItemId,
                         inventory.inventory_id,
                         quantity,
-                        transaction
+                        client
                     );
 
                 return {
                     reservation,
-                    inventory: updatedInventory
+                    inventory: {
+                        inventoryId: inventory.inventory_id,
+                        quantity: Number(inventory.quantity),
+                        reservedQuantity:
+                            Number(inventory.reserved_quantity) + quantity,
+                        availableQuantity:
+                            availableQuantity - quantity
+                    }
                 };
             });
         } catch (error) {
-            // Mỗi order item chỉ được có một reservation đang RESERVED
-            if (error.name === "SequelizeUniqueConstraintError") {
+
+            // PostgreSQL unique violation
+            // Mỗi order item chỉ có một reservation RESERVED.
+            if (error.code === "23505") {
                 throw createError(
                     "This order item already has an active reservation",
                     409
@@ -169,19 +215,17 @@ class InventoryService {
     }
 
     // ==========================================
-    // SPRINT 2: XÁC NHẬN THANH TOÁN THÀNH CÔNG
+    // SPRINT 2: THANH TOÁN THÀNH CÔNG
     // ==========================================
 
     async consumeReservation(reservationId) {
-        if (!reservationId) {
-            throw createError("Reservation ID is required");
-        }
+        requireUuid(reservationId, "Reservation ID");
 
-        return await sequelize.transaction(async (transaction) => {
+        return withTransaction(async (client) => {
             const result =
                 await inventoryRepository.consumeReservation(
                     reservationId,
-                    transaction
+                    client
                 );
 
             if (!result) {
@@ -200,15 +244,13 @@ class InventoryService {
     // ==========================================
 
     async releaseReservation(reservationId) {
-        if (!reservationId) {
-            throw createError("Reservation ID is required");
-        }
+        requireUuid(reservationId, "Reservation ID");
 
-        return await sequelize.transaction(async (transaction) => {
+        return withTransaction(async (client) => {
             const result =
                 await inventoryRepository.releaseReservation(
                     reservationId,
-                    transaction
+                    client
                 );
 
             if (!result) {

@@ -1,0 +1,244 @@
+{
+  "info": {
+    "name": "FreshVend - Sprint 1 API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "machineId", "value": "8fd61456-cef0-497a-8a4a-b88aa3aee00c" },
+    { "key": "machineCode", "value": "VM001" },
+    { "key": "slotId", "value": "b120647d-32f6-4f5f-809c-695564b25a6b" },
+    { "key": "iotDeviceSecret", "value": "" },
+    { "key": "testEmail", "value": "" },
+    { "key": "testPassword", "value": "TestPass123" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register test user",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('testEmail', `sprint1-${Date.now()}@example.test`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Created with default OPERATOR role', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(pm.response.json().user.role).to.eql('OPERATOR');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{testEmail}}\",\"fullname\":\"Sprint One Tester\",\"password\":\"{{testPassword}}\",\"role\":\"ADMIN\"}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "register"]
+            }
+          }
+        },
+        {
+          "name": "Login test user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns a JWT', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().token).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{testEmail}}\",\"password\":\"{{testPassword}}\"}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "Login with wrong password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{testEmail}}\",\"password\":\"WrongPass123\"}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Machines",
+      "item": [
+        {
+          "name": "List machines",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns machines', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const machines = pm.response.json().data;",
+                  "  pm.expect(machines).to.be.an('array');",
+                  "  if (machines.length) {",
+                  "    pm.collectionVariables.set('machineId', machines[0].id);",
+                  "    pm.collectionVariables.set('machineCode', machines[0].machineCode);",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/machines",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "machines"]
+            }
+          }
+        },
+        {
+          "name": "Get machine details and slots",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns machine and slots', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const data = pm.response.json().data;",
+                  "  pm.expect(data.id).to.eql(pm.collectionVariables.get('machineId'));",
+                  "  pm.expect(data.slots).to.be.an('array');",
+                  "  if (data.slots.length) pm.collectionVariables.set('slotId', data.slots[0].slotId);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/machines/{{machineId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "machines", "{{machineId}}"]
+            }
+          }
+        },
+        {
+          "name": "List machine slots",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/machines/{{machineId}}/slots",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "machines", "{{machineId}}", "slots"]
+            }
+          }
+        },
+        {
+          "name": "Send simulator telemetry",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-iot-key", "value": "{{iotDeviceSecret}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"machineCode\":\"{{machineCode}}\",\"machineState\":\"IDLE\",\"temperature\":4.6,\"humidity\":65,\"doorStatus\":\"CLOSED\",\"sensorStatus\":\"OK\"}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/machines/simulator/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "machines", "simulator", "status"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Inventory",
+      "item": [
+        {
+          "name": "Get inventory by machine",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/machines/{{machineId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "inventory", "machines", "{{machineId}}"]
+            }
+          }
+        },
+        {
+          "name": "Get inventory by slot",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/slots/{{slotId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "inventory", "slots", "{{slotId}}"]
+            }
+          }
+        },
+        {
+          "name": "Inventory with invalid UUID (400)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/machines/not-a-uuid",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "inventory", "machines", "not-a-uuid"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
