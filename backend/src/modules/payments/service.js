@@ -244,9 +244,9 @@ async function setPaymentResult(paymentId, body) {
     } else {
       const updated = await client.query(
         `UPDATE payments
-            SET payment_status = $1,
+            SET payment_status = $1::varchar,
                 transaction_reference = COALESCE($2, transaction_reference),
-                paid_at = CASE WHEN $1 = 'SUCCESS' THEN CURRENT_TIMESTAMP ELSE NULL END
+                paid_at = CASE WHEN $1::varchar = 'SUCCESS'::varchar THEN CURRENT_TIMESTAMP ELSE NULL END
           WHERE payment_id = $3
           RETURNING payment_id, order_id, payment_method, payment_status,
                     amount, transaction_reference, paid_at, created_at`,
