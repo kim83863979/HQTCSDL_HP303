@@ -13,7 +13,7 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 
 async function start() {
   console.log('='.repeat(55));
-  console.log(' 🥤 FreshVend Backend — đang khởi động...');
+  console.log('  FreshVend Backend — đang khởi động...');
   console.log(`    Môi trường : ${NODE_ENV}`);
   console.log(`    Port       : ${PORT}`);
   console.log('='.repeat(55));
@@ -24,7 +24,7 @@ async function start() {
   } catch (err) {
     // In thông báo lỗi rõ ràng để dễ debug
     console.error('\n' + '!'.repeat(55));
-    console.error(' ❌  KHÔNG THỂ KẾT NỐI TỚI CƠ SỞ DỮ LIỆU');
+    console.error('   KHÔNG THỂ KẾT NỐI TỚI CƠ SỞ DỮ LIỆU');
     console.error('!'.repeat(55));
     console.error(` Mã lỗi  : ${err.code || 'N/A'}`);
     console.error(` Chi tiết: ${err.message}`);
@@ -42,8 +42,8 @@ async function start() {
   // ── 2. Khởi động HTTP server ─────────────────────────────────────────────────
   app.listen(PORT, () => {
     console.log('\n' + '='.repeat(55));
-    console.log(` ✅  Server đang chạy tại http://localhost:${PORT}`);
-    console.log(` 🔍  Health check : http://localhost:${PORT}/health`);
+    console.log(`  Server đang chạy tại http://localhost:${PORT}`);
+    console.log(`   Health check : http://localhost:${PORT}/health`);
     console.log('='.repeat(55) + '\n');
   });
 }
