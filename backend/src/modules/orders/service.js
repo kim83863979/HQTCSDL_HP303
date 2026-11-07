@@ -285,10 +285,11 @@ async function reportDispenseResult(orderId, body) {
     }
 
     const reservationCounts = await client.query(
-      `SELECT COUNT(*)::int AS items,
-              COUNT(*) FILTER (WHERE r.status = 'CONSUMED')::int AS consumed
+      `SELECT COUNT(DISTINCT oi.order_item_id)::int AS items,
+              COUNT(DISTINCT oi.order_item_id) FILTER (WHERE r.status = 'CONSUMED')::int AS consumed
          FROM order_items oi
-         LEFT JOIN inventory_reservations r ON r.order_item_id = oi.order_item_id
+         LEFT JOIN inventory_reservations r
+           ON r.order_item_id = oi.order_item_id AND r.status = 'CONSUMED'
         WHERE oi.order_id = $1`,
       [orderId]
     );
