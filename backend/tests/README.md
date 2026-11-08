@@ -7,7 +7,9 @@ Chạy toàn bộ kiểm thử bằng `npm test`.
 Các test Products/Categories, Machines, Inventory và Auth cần PostgreSQL cùng
 dữ liệu mẫu. Nhóm test Machines/Inventory/Auth tự bỏ qua các trường hợp cần DB
 nếu chưa cấu hình `DATABASE_URL`; test validate input vẫn chạy. Test Auth tạo
-tài khoản riêng theo UUID và xóa tài khoản đó sau khi hoàn tất.
+tài khoản riêng theo UUID và xóa tài khoản đó sau khi hoàn tất. Test Machines
+và Inventory dùng tài khoản seed `operator@freshvend.com` để kiểm tra các
+permission `VIEW_MACHINE` và `MANAGE_INVENTORY`.
 
 Các API tương ứng cũng có trong Postman Collection
 `docs/api/sprint1-api.postman_collection.json`; Products/Categories có

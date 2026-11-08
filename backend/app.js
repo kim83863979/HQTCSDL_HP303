@@ -29,13 +29,15 @@ app.get('/health', async (req, res, next) => {
 });
 
 // ── Routes Sprint 1 ───────────────────────────────────────────────────────────
-app.use('/api/auth',      require('./src/router/auth.router'));
+app.use('/api/auth',      require('./src/modules/auth/auth.router'));
+app.use('/api/admin',     require('./src/modules/auth/admin.router'));
 app.use('/api/inventory', require('./src/router/inventory.router'));
 app.use('/api/machines',  require('./src/modules/machines/machine.router'));
 
 // ── Products & Categories (Nghĩa - Sprint 1) ─────────────────────────────────
 app.use('/api/products',   require('./src/modules/products/product.routes'));
 app.use('/api/categories', require('./src/modules/products/category.routes'));
+app.use('/api/orders',     require('./src/modules/orders/order.router'));
 
 // ── 404 — route không tồn tại ────────────────────────────────────────────────
 app.use((req, res) => {

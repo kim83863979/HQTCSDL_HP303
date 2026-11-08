@@ -59,14 +59,14 @@ VALUES
         (SELECT role_id FROM roles WHERE name = 'ADMIN'),
         'admin@freshvend.com',
         'System Administrator',
-        '$2b$12$eA8bZ3y9Y9mY0mJk3pZzYeOQvR1tX2b8v.uV6r5aZ1kP5c7hD4p2m'
+        '$2a$12$4/JCre5BXmE8Zxebv9LHw.UMJSlRYpIuEfcmuDMp8Ls/n90ca22We'
     ),
     (
         gen_random_uuid(),
         (SELECT role_id FROM roles WHERE name = 'OPERATOR'),
         'operator@freshvend.com',
         'Field Operator Huy',
-        '$2b$12$eA8bZ3y9Y9mY0mJk3pZzYeOQvR1tX2b8v.uV6r5aZ1kP5c7hD4p2m'
+        '$2a$12$4/JCre5BXmE8Zxebv9LHw.UMJSlRYpIuEfcmuDMp8Ls/n90ca22We'
     )
 ON CONFLICT (email) DO NOTHING;
 
@@ -240,17 +240,28 @@ BEGIN
     SELECT product_id INTO v_prod_apple_id FROM products WHERE product_name = 'Apple';
     SELECT product_id INTO v_prod_banana_id FROM products WHERE product_name = 'Banana';
 
-    -- 13.1 Tạo Order
+    -- 13.1 Tạo Order; trigger cập nhật total_amount theo các dòng hàng.
     INSERT INTO orders (order_id, machine_id, order_status, total_amount, created_at)
-    VALUES (v_order_id, v_machine_id, 'COMPLETED', 40000.00, CURRENT_TIMESTAMP - INTERVAL '30 minutes');
+    VALUES (v_order_id, v_machine_id, 'PENDING', 0.00, CURRENT_TIMESTAMP - INTERVAL '30 minutes');
 
-    -- 13.2 Tạo Order Items (1 Apple = 25k, 1 Banana = 15k)
-    INSERT INTO order_items (order_item_id, order_id, product_id, quantity, unit_price, subtotal)
+    -- 13.2 Tạo Order Items (1 Apple = 25k, 1 Banana = 15k), chỉ rõ khe xuất hàng.
+    INSERT INTO order_items (order_item_id, order_id, product_id, slot_id, quantity, unit_price, subtotal)
     VALUES 
-        (gen_random_uuid(), v_order_id, v_prod_apple_id, 1, 25000.00, 25000.00),
-        (gen_random_uuid(), v_order_id, v_prod_banana_id, 1, 15000.00, 15000.00);
+        (gen_random_uuid(), v_order_id, v_prod_apple_id,
+         (SELECT slot_id FROM machine_slots WHERE machine_id = v_machine_id AND slot_code = 'A01'),
+         1, 25000.00, 25000.00),
+        (gen_random_uuid(), v_order_id, v_prod_banana_id,
+         (SELECT slot_id FROM machine_slots WHERE machine_id = v_machine_id AND slot_code = 'A03'),
+         1, 15000.00, 15000.00);
 
-    -- 13.3 Tạo Payment qua mã QR
+    -- 13.3 Giữ chỗ trước khi xác nhận thanh toán.
+    INSERT INTO inventory_reservations (order_item_id, inventory_id, quantity)
+    SELECT oi.order_item_id, i.inventory_id, oi.quantity
+    FROM order_items oi
+    JOIN inventories i ON i.slot_id = oi.slot_id AND i.product_id = oi.product_id
+    WHERE oi.order_id = v_order_id;
+
+    -- 13.4 Ghi payment attempt rồi xác nhận thành công qua cùng transaction.
     INSERT INTO payments (
         payment_id, order_id, payment_method, payment_status, 
         amount, transaction_reference, paid_at, created_at
@@ -259,12 +270,20 @@ BEGIN
         gen_random_uuid(),
         v_order_id,
         'QR',
-        'SUCCESS',
+        'PENDING',
         40000.00,
         'VNPAY_REF_20261031_0001',
-        CURRENT_TIMESTAMP - INTERVAL '29 minutes',
+        NULL,
         CURRENT_TIMESTAMP - INTERVAL '30 minutes'
     );
+
+    UPDATE payments
+    SET payment_status = 'SUCCESS',
+        paid_at = CURRENT_TIMESTAMP - INTERVAL '29 minutes'
+    WHERE order_id = v_order_id;
+
+    UPDATE orders SET order_status = 'DISPENSING' WHERE order_id = v_order_id;
+    UPDATE orders SET order_status = 'COMPLETED' WHERE order_id = v_order_id;
 END $$;
 
 -- ------------------------------------------------------------------------------

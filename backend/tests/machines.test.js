@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
-const { after, describe, it } = require('node:test');
+const { after, before, describe, it } = require('node:test');
+const jwt = require('jsonwebtoken');
 const request = require('supertest');
 
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
@@ -10,33 +11,59 @@ const { pool } = require('../src/config/db');
 const MACHINE_ID = '8fd61456-cef0-497a-8a4a-b88aa3aee00c';
 const UNKNOWN_ID = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
 const hasDatabase = Boolean(process.env.DATABASE_URL);
+const jwtSecret = process.env.JWT_SECRET || 'freshvend_dev_secret_change_in_production';
+let operatorToken;
+
+before(async () => {
+  if (!hasDatabase) return;
+  const result = await pool.query(
+    `SELECT u.user_id, u.email
+     FROM users u JOIN roles r USING(role_id)
+     WHERE u.email = 'operator@freshvend.com' AND r.name = 'OPERATOR'`,
+  );
+  assert.equal(result.rowCount, 1, 'seeded OPERATOR account is required for API tests');
+  operatorToken = jwt.sign(
+    { email: result.rows[0].email, role: 'OPERATOR' },
+    jwtSecret,
+    { subject: result.rows[0].user_id, expiresIn: '1h' },
+  );
+});
 
 after(() => pool.end());
 
 describe('Machines API', () => {
+  it('rejects machine queries without authentication', async () => {
+    await request(app).get('/api/machines').expect(401);
+  });
+
   it('lists machines', { skip: !hasDatabase }, async () => {
-    const res = await request(app).get('/api/machines').expect(200);
+    const res = await request(app).get('/api/machines')
+      .set('Authorization', `Bearer ${operatorToken}`).expect(200);
     assert.ok(Array.isArray(res.body.data));
   });
 
   it('returns a machine and its slots by UUID', { skip: !hasDatabase }, async () => {
-    const res = await request(app).get(`/api/machines/${MACHINE_ID}`).expect(200);
+    const res = await request(app).get(`/api/machines/${MACHINE_ID}`)
+      .set('Authorization', `Bearer ${operatorToken}`).expect(200);
     assert.equal(res.body.data.id, MACHINE_ID);
     assert.ok(Array.isArray(res.body.data.slots));
   });
 
   it('lists slots for a machine', { skip: !hasDatabase }, async () => {
-    const res = await request(app).get(`/api/machines/${MACHINE_ID}/slots`).expect(200);
+    const res = await request(app).get(`/api/machines/${MACHINE_ID}/slots`)
+      .set('Authorization', `Bearer ${operatorToken}`).expect(200);
     assert.ok(Array.isArray(res.body.data));
   });
 
-  it('rejects a malformed machine UUID', async () => {
-    const res = await request(app).get('/api/machines/not-a-uuid').expect(400);
+  it('rejects a malformed machine UUID', { skip: !hasDatabase }, async () => {
+    const res = await request(app).get('/api/machines/not-a-uuid')
+      .set('Authorization', `Bearer ${operatorToken}`).expect(400);
     assert.equal(res.body.errorCode, 'INVALID_MACHINE_ID');
   });
 
   it('returns 404 for an unknown machine UUID', { skip: !hasDatabase }, async () => {
-    const res = await request(app).get(`/api/machines/${UNKNOWN_ID}`).expect(404);
+    const res = await request(app).get(`/api/machines/${UNKNOWN_ID}`)
+      .set('Authorization', `Bearer ${operatorToken}`).expect(404);
     assert.equal(res.body.errorCode, 'MACHINE_NOT_FOUND');
   });
 
