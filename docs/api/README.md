@@ -2,6 +2,7 @@
 
 Backend chạy mặc định tại `http://localhost:3000`. Các endpoint hiện được mount:
 
+<<<<<<< HEAD
 | Nhóm | Endpoint |
 |---|---|
 | Auth | `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me` |
@@ -56,3 +57,8 @@ Postman collections:
 khi chạy. Giá trị ID mặc định lấy từ dữ liệu mẫu trong database dump.
 Kiểm thử tự động: chạy `npm test` trong thư mục `backend` sau khi cấu hình DB
 và cài dependency.
+=======
+Các API dự kiến trong Sprint 1: đăng nhập, danh mục/sản phẩm, tồn kho và thông
+tin máy/trạng thái cơ bản.
+Sprint 2 Product/Order/Payment API (Nghĩa): [sprint2-nghia.md](sprint2-nghia.md).
+>>>>>>> feature/nghia-order-payment
