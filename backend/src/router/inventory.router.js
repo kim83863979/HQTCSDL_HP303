@@ -12,24 +12,42 @@ const canManageInventory = [
 ];
 
 // Sprint 1: Truy vấn tồn kho
-router.get("/machines/:machineId", inventoryController.getInventoryByMachine);
-router.get("/slots/:slotId", inventoryController.getInventoryBySlot);
+router.get(
+  "/machines/:machineId",
+  ...canManageInventory,
+  inventoryController.getInventoryByMachine,
+);
+router.get(
+  "/slots/:slotId",
+  ...canManageInventory,
+  inventoryController.getInventoryBySlot,
+);
 
 // Sprint 2: Kiểm tra tồn kho
-router.get("/availability", inventoryController.checkAvailability);
+router.get(
+  "/availability",
+  ...canManageInventory,
+  inventoryController.checkAvailability,
+);
 
 // Sprint 2: Giữ hàng
-router.post("/reservations", inventoryController.reserveInventory);
+router.post(
+  "/reservations",
+  ...canManageInventory,
+  inventoryController.reserveInventory,
+);
 
 // Sprint 2: Xác nhận trừ kho
 router.post(
   "/reservations/:reservationId/consume",
+  ...canManageInventory,
   inventoryController.consumeReservation,
 );
 
 // Sprint 2: Giải phóng hàng
 router.post(
   "/reservations/:reservationId/release",
+  ...canManageInventory,
   inventoryController.releaseReservation,
 );
 

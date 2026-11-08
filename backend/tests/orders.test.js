@@ -253,6 +253,7 @@ describe('Orders and payment lifecycle', () => {
       { productId: productB, slotId: slotA, quantity: 1 },
     ])).status, 400);
     assert.equal((await request(app).post('/api/orders').send({ machineId, items: [] })).status, 400);
+    assert.equal((await request(app).post('/api/orders').send(null)).status, 400);
   });
 
   it('rejects stock quantities above slot capacity', async () => {
@@ -273,6 +274,34 @@ describe('Orders and payment lifecycle', () => {
     assert.equal(unauthorized.status, 401);
     assert.equal((await sendCallback(payment.body.data.id, 'FAILED')).status, 200);
     assert.equal((await sendCallback(payment.body.data.id, 'SUCCESS')).status, 409);
+  });
+
+  it('keeps the legacy payment routes on the same reserved-stock lifecycle', async () => {
+    const beforeStock = await inventoryFor(slotA);
+    const created = await createOrder([
+      { productId: productA, slotId: slotA, quantity: 1 },
+    ]);
+    assert.equal(created.status, 201);
+
+    const payment = await request(app)
+      .post('/api/payments')
+      .send({ orderId: created.body.data.id, paymentMethod: 'QR' })
+      .expect(201);
+    const paymentId = payment.body.data.paymentId;
+
+    await request(app)
+      .post(`/api/payments/${paymentId}/result`)
+      .send({ paymentStatus: 'SUCCESS' })
+      .expect(401);
+
+    const settled = await request(app)
+      .post(`/api/payments/${paymentId}/result`)
+      .set('x-payment-key', process.env.PAYMENT_WEBHOOK_SECRET)
+      .send({ paymentStatus: 'SUCCESS', transactionReference: `alias-${randomUUID()}` })
+      .expect(200);
+    assert.equal(settled.body.data.orderStatus, 'PAID');
+    assert.equal((await inventoryFor(slotA)).quantity, beforeStock.quantity - 1);
+    assert.equal((await inventoryFor(slotA)).reserved_quantity, 0);
   });
 
   it('database rejects empty orders and incorrect line subtotals', async () => {

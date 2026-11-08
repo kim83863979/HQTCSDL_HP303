@@ -21,17 +21,17 @@ const getOrder = handle((req) => orderService.getOrder(req.params.orderId));
 
 const createPaymentAttempt = handle(async (req) => ({
   _created: true,
-  data: await orderService.createPaymentAttempt(req.params.orderId, req.body.paymentMethod),
+  data: await orderService.createPaymentAttempt(req.params.orderId, req.body?.paymentMethod),
 }));
 
 const processPaymentCallback = handle((req) => (
-  orderService.processPaymentCallback(req.params.paymentId, req.body)
+  orderService.processPaymentCallback(req.params.paymentId, req.body || {})
 ));
 
 const cancelOrder = handle((req) => orderService.cancelOrder(req.params.orderId));
 
 const recordDispenseResult = handle((req) => (
-  orderService.recordDispenseResult(req.params.orderId, req.body.success)
+  orderService.recordDispenseResult(req.params.orderId, req.body?.success)
 ));
 
 const expireOrders = handle(async () => ({

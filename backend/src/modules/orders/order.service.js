@@ -63,7 +63,9 @@ async function reserveOrderItems(client, orderItems, machineId) {
   return inventoryBySlot;
 }
 
-async function createOrder({ machineId: rawMachineId, items: rawItems }) {
+async function createOrder(payload = {}) {
+  const rawMachineId = payload?.machineId;
+  const rawItems = payload?.items;
   const machineId = requireUuid(rawMachineId, 'machineId');
   if (!Array.isArray(rawItems) || rawItems.length === 0 || rawItems.length > 50) {
     throw new AppError(400, 'Đơn hàng cần từ 1 đến 50 sản phẩm.');
@@ -84,10 +86,13 @@ async function createOrder({ machineId: rawMachineId, items: rawItems }) {
   return orderRepository.withTransaction(async (client) => {
     await orderRepository.expirePendingOrders(client);
     const machine = await client.query(
-      'SELECT machine_id FROM machines WHERE machine_id = $1 FOR KEY SHARE',
+      'SELECT machine_id, lifecycle_status FROM machines WHERE machine_id = $1 FOR KEY SHARE',
       [machineId],
     );
     if (!machine.rowCount) throw new AppError(404, 'Không tìm thấy máy bán hàng.');
+    if (machine.rows[0].lifecycle_status !== 'ACTIVE') {
+      conflict('Máy hiện không nhận đơn hàng.');
+    }
 
     await reserveOrderItems(client, items, machineId);
     const orderResult = await client.query(
@@ -228,7 +233,8 @@ async function createPaymentAttempt(orderId, rawMethod) {
   });
 }
 
-async function processPaymentCallback(paymentId, { status: rawStatus, transactionReference }) {
+async function processPaymentCallback(paymentId, callback = {}) {
+  const { status: rawStatus, transactionReference } = callback || {};
   requireUuid(paymentId, 'paymentId');
   if (typeof rawStatus !== 'string' || !PAYMENT_RESULTS.has(rawStatus)) {
     throw new AppError(400, 'status chỉ nhận SUCCESS, FAILED hoặc REFUNDED.');

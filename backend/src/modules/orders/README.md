@@ -1,8 +1,18 @@
-# Order API — Sprint 2 (Nghĩa)
+# Order API — Sprint 2
 
-- `POST /api/orders`: nhận `machineId` và danh sách `items[{productId, quantity}]`; giá và tổng tiền lấy/tính từ database; đơn mới ở trạng thái PENDING.
-- `GET /api/orders/:orderId`: trả đơn, Order Items và payment nếu đã tạo.
+- `POST /api/orders`: nhận `machineId` và danh sách
+  `items[{productId, slotId, quantity}]`. Máy phải ACTIVE; sản phẩm và khe phải
+  ACTIVE, khe phải thuộc máy và đủ tồn khả dụng. Giá/tổng tiền lấy từ database.
+- Đơn mới ở trạng thái PENDING; Order Items lưu slot, giá tại thời điểm đặt,
+  và số lượng được giữ nguyên tử cùng transaction.
+- `GET /api/orders/:orderId`: trả đơn, Order Items và lịch sử payment.
+- `POST /api/orders/:orderId/payments`: tạo lần thanh toán PENDING.
+- `POST /api/orders/payments/:paymentId/callback`: nhận callback có shared key;
+  kết quả SUCCESS/FAILED được xử lý idempotent.
+- `POST /api/orders/:orderId/cancel` và `/api/orders/expire`: hủy đơn, giải
+  phóng hàng đã giữ.
+- `POST /api/orders/:orderId/dispense-result`: ghi nhận kết quả nhả hàng; nếu
+  thất bại, tồn kho đã trừ được hoàn lại.
 
-Tạo đơn kiểm tra máy ACTIVE, sản phẩm ACTIVE và số lượng đang có ở các khe ACTIVE của máy. Module này chưa giữ/trừ tồn; thao tác đó thuộc Inventory. Khi tích hợp, cần phối hợp để giữ/trừ tồn nguyên tử với việc tạo đơn, tránh bán vượt tồn kho và giải phóng hàng khi đơn thất bại/hủy.
-
-Schema hiện chưa có customer_id/user_id trên orders, vì vậy endpoint tra cứu chưa thể giới hạn đơn theo khách hàng. Cần thống nhất với nhóm khi cập nhật schema và auth.
+`GET /api/orders/:orderId` hiện chưa giới hạn theo khách hàng do schema chưa lưu
+`user_id` trên orders.

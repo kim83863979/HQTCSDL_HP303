@@ -1,12 +1,30 @@
 const express = require('express');
 const service = require('./service');
+const orderService = require('../orders/order.service');
+const verifySharedSecret = require('../../middleware/verifySharedSecret');
 
 const router = express.Router();
+const verifyPaymentWebhook = verifySharedSecret({
+  environmentVariable: 'PAYMENT_WEBHOOK_SECRET',
+  headerName: 'x-payment-key',
+  errorCode: 'UNAUTHORIZED_PAYMENT_WEBHOOK',
+});
 
 router.post('/', async (req, res, next) => {
   try {
-    const result = await service.createPayment(req.body);
-    return res.status(result.created ? 201 : 200).json({ success: true, data: result.payment });
+    const { orderId, paymentMethod } = req.body || {};
+    const payment = await orderService.createPaymentAttempt(orderId, paymentMethod);
+    return res.status(201).json({
+      success: true,
+      data: {
+        paymentId: payment.id,
+        orderId: payment.orderId,
+        paymentMethod: payment.method,
+        paymentStatus: payment.status,
+        amount: payment.amount,
+        createdAt: payment.createdAt,
+      },
+    });
   } catch (error) {
     return next(error);
   }
@@ -22,10 +40,25 @@ router.get('/:paymentId', async (req, res, next) => {
 });
 
 // Endpoint mô phỏng callback của cổng thanh toán cho demo Sprint 2.
-router.post('/:paymentId/result', async (req, res, next) => {
+router.post('/:paymentId/result', verifyPaymentWebhook, async (req, res, next) => {
   try {
-    const result = await service.setPaymentResult(req.params.paymentId, req.body);
-    return res.json({ success: true, data: result });
+    const { paymentStatus, transactionReference } = req.body || {};
+    const result = await orderService.processPaymentCallback(req.params.paymentId, {
+      status: paymentStatus,
+      transactionReference,
+    });
+    const [payment, order] = await Promise.all([
+      service.getPaymentById(req.params.paymentId),
+      orderService.getOrder(result.orderId),
+    ]);
+    return res.json({
+      success: true,
+      data: {
+        payment,
+        orderStatus: order.status,
+        changed: !result.idempotent,
+      },
+    });
   } catch (error) {
     return next(error);
   }

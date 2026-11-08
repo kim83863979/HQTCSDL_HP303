@@ -576,7 +576,13 @@ const receiveSimulatorStatus = async (payload) => {
     errorMessage:     warningMessage,
   });
 
-  return { machineId: machine.id, machineCode: machine.machineCode, tempWarning: warningMessage, status: recorded };
+  return {
+    machineId: machine.id,
+    machineCode: machine.machineCode,
+    operationStatus: recorded.operation_status,
+    tempWarning: warningMessage,
+    status: recorded,
+  };
 };
 
 module.exports = {

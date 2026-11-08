@@ -37,6 +37,14 @@ describe('Inventory API', () => {
     await request(app).get(`/api/inventory/machines/${MACHINE_ID}`).expect(401);
   });
 
+  it('rejects a missing reservation payload', { skip: !hasDatabase }, async () => {
+    await request(app)
+      .post('/api/inventory/reservations')
+      .set('Authorization', `Bearer ${operatorToken}`)
+      .send(null)
+      .expect(400);
+  });
+
   it('returns inventory for a machine', { skip: !hasDatabase }, async () => {
     const res = await request(app)
       .get(`/api/inventory/machines/${MACHINE_ID}`)

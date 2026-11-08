@@ -4,6 +4,10 @@ const httpError = require('../../shared/httpError');
 
 const router = express.Router();
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const mapProduct = (product) => ({
+  ...product,
+  unitPrice: Number(product.unitPrice),
+});
 
 router.get('/', async (req, res, next) => {
   try {
@@ -43,7 +47,7 @@ router.get('/', async (req, res, next) => {
     const total = count.rows[0].total;
     return res.json({
       success: true,
-      data: data.rows,
+      data: data.rows.map(mapProduct),
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
     });
   } catch (error) {
@@ -69,7 +73,7 @@ router.get('/:productId', async (req, res, next) => {
     if (!result.rows[0]) {
       throw httpError(404, 'PRODUCT_NOT_FOUND', 'Không tìm thấy sản phẩm đang được bán.');
     }
-    return res.json({ success: true, data: result.rows[0] });
+    return res.json({ success: true, data: mapProduct(result.rows[0]) });
   } catch (error) {
     return next(error);
   }

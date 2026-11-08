@@ -74,7 +74,7 @@ class InventoryController {
     // POST /api/inventory/reservations
     async reserveInventory(req, res, next) {
         try {
-            const { orderItemId, slotId, productId, quantity } = req.body;
+            const { orderItemId, slotId, productId, quantity } = req.body || {};
 
             const result = await inventoryService.reserveInventory(
                 orderItemId,
