@@ -1,9 +1,16 @@
 # Kiểm thử backend
 
-Đặt kiểm thử cho các API và module nền tảng tại đây. Sprint 1 cần kiểm tra tối
-thiểu:
+Cài dependency trong `backend` bằng `npm install`, cấu hình `DATABASE_URL` và
+`JWT_SECRET` (nếu cần), sau đó chạy migration và dữ liệu seed của database.
+Chạy toàn bộ kiểm thử bằng `npm test`.
 
-- Đọc danh sách/chi tiết sản phẩm.
-- Truy vấn tồn kho với máy/khe hợp lệ và không hợp lệ.
-- Đăng nhập thành công, sai thông tin và thiếu thông tin.
-- API được bảo vệ khi chưa đăng nhập và khi vai trò không phù hợp.
+Các test Products/Categories, Machines, Inventory và Auth cần PostgreSQL cùng
+dữ liệu mẫu. Nhóm test Machines/Inventory/Auth tự bỏ qua các trường hợp cần DB
+nếu chưa cấu hình `DATABASE_URL`; test validate input vẫn chạy. Test Auth tạo
+tài khoản riêng theo UUID và xóa tài khoản đó sau khi hoàn tất. Test Machines
+và Inventory dùng tài khoản seed `operator@freshvend.com` để kiểm tra các
+permission `VIEW_MACHINE` và `MANAGE_INVENTORY`.
+
+Các API tương ứng cũng có trong Postman Collection
+`docs/api/sprint1-api.postman_collection.json`; Products/Categories có
+collection riêng tại `docs/api/product-api.postman_collection.json`.
