@@ -14,7 +14,6 @@ const canManageInventory = [
 // Sprint 1: Truy vấn tồn kho
 router.get(
   "/machines/:machineId",
-  ...canManageInventory,
   inventoryController.getInventoryByMachine,
 );
 router.get(

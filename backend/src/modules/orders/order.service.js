@@ -119,6 +119,20 @@ async function createOrder(payload = {}) {
       );
     }
 
+    // The deferred database constraint checks the order total against its
+    // line items at commit, so store the final total before the transaction ends.
+    await client.query(
+      `UPDATE orders
+          SET total_amount = (
+                SELECT COALESCE(SUM(subtotal), 0)
+                  FROM order_items
+                 WHERE order_id = $1
+              ),
+              updated_at = CURRENT_TIMESTAMP
+        WHERE order_id = $1`,
+      [orderId],
+    );
+
     return orderRepository.findOrderDetails(client, orderId);
   });
 }
@@ -291,6 +305,37 @@ async function processPaymentCallback(paymentId, callback = {}) {
        RETURNING payment_id, order_id, payment_status, transaction_reference`,
       [paymentId, rawStatus, transactionReference || null],
     );
+
+    // Apply lifecycle changes here too, so payment behavior does not silently
+    // depend on the payment-result trigger being installed in the local DB.
+    if (rawStatus === 'SUCCESS') {
+      await client.query(
+        `UPDATE inventory_reservations ir
+         SET status = 'CONSUMED', resolved_at = CURRENT_TIMESTAMP
+         FROM order_items oi
+         WHERE oi.order_item_id = ir.order_item_id
+           AND oi.order_id = $1
+           AND ir.status = 'RESERVED'`,
+        [order.order_id],
+      );
+      await client.query(
+        `UPDATE orders
+         SET order_status = 'PAID', updated_at = CURRENT_TIMESTAMP
+         WHERE order_id = $1 AND order_status = 'PENDING'`,
+        [order.order_id],
+      );
+    } else if (rawStatus === 'FAILED') {
+      await client.query(
+        `UPDATE inventory_reservations ir
+         SET status = 'RELEASED', resolved_at = CURRENT_TIMESTAMP
+         FROM order_items oi
+         WHERE oi.order_item_id = ir.order_item_id
+           AND oi.order_id = $1
+           AND ir.status = 'RESERVED'`,
+        [order.order_id],
+      );
+    }
+
     return {
       id: result.rows[0].payment_id,
       orderId: result.rows[0].order_id,

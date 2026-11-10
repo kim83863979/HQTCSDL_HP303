@@ -12,7 +12,8 @@ const canViewMachines = [authenticateToken, requirePermissions("VIEW_MACHINE")];
 const canManageSlots = [authenticateToken, requireRoles("ADMIN", "OPERATOR")];
 
 // ─── Các endpoint Sprint 1 ────────────────────────────────────────────────────
-router.get("/", ...canViewMachines, machineController.getAllMachines);
+// Public read-only list for the customer-facing Vending Client demo.
+router.get("/", machineController.getAllMachines);
 router.post(
   "/simulator/status",
   verifyIotDevice,
