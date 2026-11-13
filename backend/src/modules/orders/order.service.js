@@ -145,20 +145,19 @@ async function createPaymentAttempt(orderId, rawMethod) {
     throw new AppError(400, 'paymentMethod chỉ nhận CASH, CARD hoặc QR.');
   }
 
-  return orderRepository.withTransaction(async (client) => {
-    await orderRepository.expirePendingOrders(client);
+  const outcome = await orderRepository.withTransaction(async (client) => {
     const order = await orderRepository.findOrder(client, orderId, { lock: true });
     if (!order) throw new AppError(404, 'Không tìm thấy đơn hàng.');
-    if (order.order_status !== 'PENDING') {
-      conflict('Chỉ đơn PENDING mới được thanh toán.');
-    }
-    if (new Date(order.expires_at) <= new Date()) {
+    if (order.order_status === 'PENDING' && new Date(order.expires_at) <= new Date()) {
       await client.query(
         `UPDATE orders SET order_status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP
          WHERE order_id = $1`,
         [orderId],
       );
-      conflict('Đơn hàng đã hết thời gian thanh toán.');
+      return { expired: true }; // commit việc hủy trước, ném lỗi sau khi transaction xong
+    }
+    if (order.order_status !== 'PENDING') {
+      conflict('Chỉ đơn PENDING mới được thanh toán.');
     }
 
     const pending = await client.query(
@@ -223,14 +222,18 @@ async function createPaymentAttempt(orderId, rawMethod) {
     );
     const payment = result.rows[0];
     return {
-      id: payment.payment_id,
-      orderId: payment.order_id,
-      method: payment.payment_method,
-      status: payment.payment_status,
-      amount: Number(payment.amount),
-      createdAt: payment.created_at,
+      payment: {
+        id: payment.payment_id,
+        orderId: payment.order_id,
+        method: payment.payment_method,
+        status: payment.payment_status,
+        amount: Number(payment.amount),
+        createdAt: payment.created_at,
+      },
     };
   });
+  if (outcome.expired) conflict('Đơn hàng đã hết thời gian thanh toán.');
+  return outcome.payment;
 }
 
 async function processPaymentCallback(paymentId, callback = {}) {
