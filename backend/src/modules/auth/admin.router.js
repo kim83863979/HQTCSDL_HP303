@@ -6,9 +6,7 @@ const { UUID_RE } = require('./auth.validation');
 
 const router = express.Router();
 
-router.use(authenticateToken, requirePermissions('MANAGE_USER'));
-
-router.get('/users', async (req, res, next) => {
+router.get('/users', authenticateToken, requirePermissions('MANAGE_USER'), async (req, res, next) => {
   try {
     return res.status(200).json({ users: await authService.listUsers() });
   } catch (error) {
@@ -16,7 +14,7 @@ router.get('/users', async (req, res, next) => {
   }
 });
 
-router.patch('/users/:userId/role', async (req, res, next) => {
+router.patch('/users/:userId/role', authenticateToken, requirePermissions('MANAGE_USER'), async (req, res, next) => {
   const { userId } = req.params;
   if (!UUID_RE.test(userId)) {
     return res.status(400).json({ message: 'userId phải là UUID hợp lệ.' });

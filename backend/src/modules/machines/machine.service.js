@@ -539,6 +539,7 @@ const receiveSimulatorStatus = async (payload) => {
 
   const isOutOfRange = parsedTemp !== null && (parsedTemp < machine.minTemperature || parsedTemp > machine.maxTemperature);
   const isUnauthorizedDoorOpen = normalizedDoor === 'OPEN' && rawOpState !== 'MAINTENANCE';
+  const alertConditions = [];
 
   let healthStatus = 'NORMAL';
   let resolvedErrorCode = errorCode;
@@ -550,16 +551,45 @@ const receiveSimulatorStatus = async (payload) => {
     resolvedErrorCode = resolvedErrorCode || 'SENSOR_DHT22_FAULT';
     warningMessage = 'Cảm biến DHT22 lỗi.';
     severity = 'ERROR';
+    alertConditions.push({
+      alertType: 'SENSOR_FAULT',
+      severity: 'CRITICAL',
+      message: warningMessage,
+    });
   } else if (isOutOfRange) {
     healthStatus = 'WARNING';
     resolvedErrorCode = resolvedErrorCode || 'TEMP_OUT_OF_RANGE';
     warningMessage = `Nhiệt độ ${parsedTemp}°C ngoài ngưỡng chuẩn.`;
     severity = 'WARNING';
+    alertConditions.push({
+      alertType: 'TEMPERATURE_OUT_OF_RANGE',
+      severity: 'WARNING',
+      message: `${warningMessage} Ngưỡng cho phép: ${machine.minTemperature}-${machine.maxTemperature}°C.`,
+    });
   } else if (isUnauthorizedDoorOpen) {
     healthStatus = 'WARNING';
     resolvedErrorCode = resolvedErrorCode || 'UNAUTHORIZED_DOOR_OPEN';
     warningMessage = 'Cửa mở trái phép.';
     severity = 'CRITICAL';
+    alertConditions.push({
+      alertType: 'UNAUTHORIZED_DOOR_OPEN',
+      severity: 'CRITICAL',
+      message: warningMessage,
+    });
+  }
+  if (rawOpState === 'OFFLINE') {
+    alertConditions.push({
+      alertType: 'MACHINE_OFFLINE',
+      severity: 'CRITICAL',
+      message: 'Máy báo trạng thái ngoại tuyến.',
+    });
+  }
+  if (errorCode && !isSensorFault && !isOutOfRange && !isUnauthorizedDoorOpen) {
+    alertConditions.push({
+      alertType: 'DEVICE_ERROR',
+      severity: 'WARNING',
+      message: `Thiết bị báo lỗi ${errorCode}.`,
+    });
   }
 
   const recorded = await Machine.recordSimulatorStatus(machine.id, {
@@ -574,6 +604,7 @@ const receiveSimulatorStatus = async (payload) => {
     eventType:        resolvedErrorCode ? 'ALERT' : 'TELEMETRY',
     severity,
     errorMessage:     warningMessage,
+    alertConditions,
   });
 
   return {

@@ -31,7 +31,11 @@ app.get("/health", async (req, res, next) => {
 // ── Routes Sprint 1 ───────────────────────────────────────────────────────────
 app.use("/api/auth", require("./src/modules/auth/auth.router"));
 app.use("/api/admin", require("./src/modules/auth/admin.router"));
+app.use("/api/admin", require("./src/modules/products/admin.routes"));
+app.use("/api/admin", require("./src/modules/alerts/admin.routes"));
+app.use("/api/admin", require("./src/modules/reports/admin.routes"));
 app.use("/api/inventory", require("./src/router/inventory.router"));
+app.use("/api/inventory", require("./src/modules/inventory/admin.routes"));
 app.use("/api/machines", require("./src/modules/machines/machine.router"));
 
 // ── API modules ─────────────────────────────────────────────────────────────

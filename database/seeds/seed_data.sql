@@ -76,11 +76,12 @@ ON CONFLICT (email) DO NOTHING;
 INSERT INTO audit_logs (audit_log_id, user_id, action, created_at)
 VALUES 
     (
-        gen_random_uuid(),
+        '00000000-0000-4000-8000-000000000001',
         (SELECT user_id FROM users WHERE email = 'admin@freshvend.com'),
         'SYSTEM_INITIALIZE_SEED_DATA',
         CURRENT_TIMESTAMP - INTERVAL '2 hours'
-    );
+    )
+ON CONFLICT (audit_log_id) DO NOTHING;
 
 -- ------------------------------------------------------------------------------
 -- 6. SEED CATEGORIES
@@ -219,19 +220,20 @@ ON CONFLICT (slot_id) DO NOTHING;
 -- ------------------------------------------------------------------------------
 INSERT INTO restock_events (restock_event_id, machine_id, user_id, restock_date, notes)
 VALUES (
-    gen_random_uuid(),
+    '00000000-0000-4000-8000-000000000002',
     (SELECT machine_id FROM machines WHERE machine_code = 'VM001'),
     (SELECT user_id FROM users WHERE email = 'operator@freshvend.com'),
     CURRENT_TIMESTAMP - INTERVAL '1 day',
     'Nạp đầy đủ hàng ban đầu cho các khay A01, A02, A03'
-);
+)
+ON CONFLICT (restock_event_id) DO NOTHING;
 
 -- ------------------------------------------------------------------------------
 -- 13. SEED ORDERS, ORDER_ITEMS & PAYMENTS (Giao dịch mẫu đã thành công)
 -- ------------------------------------------------------------------------------
 DO $$
 DECLARE
-    v_order_id UUID := gen_random_uuid();
+    v_order_id UUID := '00000000-0000-4000-8000-000000000003';
     v_machine_id UUID;
     v_prod_apple_id UUID;
     v_prod_banana_id UUID;
@@ -240,50 +242,52 @@ BEGIN
     SELECT product_id INTO v_prod_apple_id FROM products WHERE product_name = 'Apple';
     SELECT product_id INTO v_prod_banana_id FROM products WHERE product_name = 'Banana';
 
-    -- 13.1 Tạo Order; trigger cập nhật total_amount theo các dòng hàng.
-    INSERT INTO orders (order_id, machine_id, order_status, total_amount, created_at)
-    VALUES (v_order_id, v_machine_id, 'PENDING', 0.00, CURRENT_TIMESTAMP - INTERVAL '30 minutes');
+    IF NOT EXISTS (SELECT 1 FROM orders WHERE order_id = v_order_id) THEN
+        -- 13.1 Tạo Order; trigger cập nhật total_amount theo các dòng hàng.
+        INSERT INTO orders (order_id, machine_id, order_status, total_amount, created_at)
+        VALUES (v_order_id, v_machine_id, 'PENDING', 0.00, CURRENT_TIMESTAMP - INTERVAL '30 minutes');
 
-    -- 13.2 Tạo Order Items (1 Apple = 25k, 1 Banana = 15k), chỉ rõ khe xuất hàng.
-    INSERT INTO order_items (order_item_id, order_id, product_id, slot_id, quantity, unit_price, subtotal)
-    VALUES 
-        (gen_random_uuid(), v_order_id, v_prod_apple_id,
-         (SELECT slot_id FROM machine_slots WHERE machine_id = v_machine_id AND slot_code = 'A01'),
-         1, 25000.00, 25000.00),
-        (gen_random_uuid(), v_order_id, v_prod_banana_id,
-         (SELECT slot_id FROM machine_slots WHERE machine_id = v_machine_id AND slot_code = 'A03'),
-         1, 15000.00, 15000.00);
+        -- 13.2 Tạo order items với khe xuất hàng cụ thể.
+        INSERT INTO order_items (order_item_id, order_id, product_id, slot_id, quantity, unit_price, subtotal)
+        VALUES
+            ('00000000-0000-4000-8000-000000000004', v_order_id, v_prod_apple_id,
+             (SELECT slot_id FROM machine_slots WHERE machine_id = v_machine_id AND slot_code = 'A01'),
+             1, 25000.00, 25000.00),
+            ('00000000-0000-4000-8000-000000000005', v_order_id, v_prod_banana_id,
+             (SELECT slot_id FROM machine_slots WHERE machine_id = v_machine_id AND slot_code = 'A03'),
+             1, 15000.00, 15000.00);
 
-    -- 13.3 Giữ chỗ trước khi xác nhận thanh toán.
-    INSERT INTO inventory_reservations (order_item_id, inventory_id, quantity)
-    SELECT oi.order_item_id, i.inventory_id, oi.quantity
-    FROM order_items oi
-    JOIN inventories i ON i.slot_id = oi.slot_id AND i.product_id = oi.product_id
-    WHERE oi.order_id = v_order_id;
+        -- 13.3 Giữ chỗ trước khi xác nhận thanh toán.
+        INSERT INTO inventory_reservations (order_item_id, inventory_id, quantity)
+        SELECT oi.order_item_id, i.inventory_id, oi.quantity
+        FROM order_items oi
+        JOIN inventories i ON i.slot_id = oi.slot_id AND i.product_id = oi.product_id
+        WHERE oi.order_id = v_order_id;
 
-    -- 13.4 Ghi payment attempt rồi xác nhận thành công qua cùng transaction.
-    INSERT INTO payments (
-        payment_id, order_id, payment_method, payment_status, 
-        amount, transaction_reference, paid_at, created_at
-    )
-    VALUES (
-        gen_random_uuid(),
-        v_order_id,
-        'QR',
-        'PENDING',
-        40000.00,
-        'VNPAY_REF_20261031_0001',
-        NULL,
-        CURRENT_TIMESTAMP - INTERVAL '30 minutes'
-    );
+        -- 13.4 Ghi payment attempt rồi xác nhận thành công qua cùng transaction.
+        INSERT INTO payments (
+            payment_id, order_id, payment_method, payment_status,
+            amount, transaction_reference, paid_at, created_at
+        )
+        VALUES (
+            '00000000-0000-4000-8000-000000000006',
+            v_order_id,
+            'QR',
+            'PENDING',
+            40000.00,
+            'FRESHVEND_SEED_ORDER_000000000003',
+            NULL,
+            CURRENT_TIMESTAMP - INTERVAL '30 minutes'
+        );
 
-    UPDATE payments
-    SET payment_status = 'SUCCESS',
-        paid_at = CURRENT_TIMESTAMP - INTERVAL '29 minutes'
-    WHERE order_id = v_order_id;
+        UPDATE payments
+        SET payment_status = 'SUCCESS',
+            paid_at = CURRENT_TIMESTAMP - INTERVAL '29 minutes'
+        WHERE order_id = v_order_id;
 
-    UPDATE orders SET order_status = 'DISPENSING' WHERE order_id = v_order_id;
-    UPDATE orders SET order_status = 'COMPLETED' WHERE order_id = v_order_id;
+        UPDATE orders SET order_status = 'DISPENSING' WHERE order_id = v_order_id;
+        UPDATE orders SET order_status = 'COMPLETED' WHERE order_id = v_order_id;
+    END IF;
 END $$;
 
 -- ------------------------------------------------------------------------------
@@ -295,19 +299,20 @@ INSERT INTO temperature_logs (
 )
 VALUES 
     (
-        gen_random_uuid(),
+        '00000000-0000-4000-8000-000000000007',
         (SELECT machine_id FROM machines WHERE machine_code = 'VM001'),
         4.2, 64.5, 'OK', FALSE,
         CURRENT_TIMESTAMP - INTERVAL '15 minutes',
         CURRENT_TIMESTAMP - INTERVAL '15 minutes'
     ),
     (
-        gen_random_uuid(),
+        '00000000-0000-4000-8000-000000000008',
         (SELECT machine_id FROM machines WHERE machine_code = 'VM001'),
         4.5, 65.0, 'OK', FALSE,
         CURRENT_TIMESTAMP - INTERVAL '5 minutes',
         CURRENT_TIMESTAMP - INTERVAL '5 minutes'
-    );
+    )
+ON CONFLICT (temperature_log_id) DO NOTHING;
 
 -- ------------------------------------------------------------------------------
 -- 15. SEED MACHINE EVENTS (IoT Telemetry Event mẫu)
@@ -340,12 +345,13 @@ ON CONFLICT (idempotency_key) DO NOTHING;
 -- ------------------------------------------------------------------------------
 INSERT INTO alerts (alert_id, machine_id, alert_type, message, status, created_at)
 VALUES (
-    gen_random_uuid(),
+    '00000000-0000-4000-8000-000000000009',
     (SELECT machine_id FROM machines WHERE machine_code = 'VM001'),
     'LOW_STOCK_WARNING',
     'Khay A02 (Orange) chỉ còn 8 sản phẩm. Khuyến nghị chuẩn bị restock.',
     'OPEN',
     CURRENT_TIMESTAMP - INTERVAL '10 minutes'
-);
+)
+ON CONFLICT (alert_id) DO NOTHING;
 
 COMMIT;

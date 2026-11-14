@@ -33,11 +33,11 @@ async function start() {
     console.error("      → Mở DBeaver, thử kết nối lại.");
     console.error("   2. DATABASE_URL trong file .env có đúng không?");
     console.error(
-      `      → Hiện tại: ${process.env.DATABASE_URL || "(chưa cấu hình)"}`,
+      `      → Trạng thái: ${process.env.DATABASE_URL ? "đã cấu hình" : "chưa cấu hình"}`,
     );
     console.error('   3. Database "FreshVend" đã được tạo và import SQL chưa?');
     console.error(
-      "      → Xem: database/migrations/dump-FreshVend-202611011643.sql",
+      "      → Xem database/README.md để khôi phục baseline và chạy migrations.",
     );
     console.error("!".repeat(55) + "\n");
     process.exit(1); // dừng hẳn, không khởi động server

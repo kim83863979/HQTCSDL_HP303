@@ -24,11 +24,8 @@ class InventoryRepository {
                 p.unit_price,
                 p.status AS product_status,
                 i.quantity,
-                COALESCE(r.reserved_quantity, 0)::integer
-                    AS reserved_quantity,
-                (
-                    i.quantity - COALESCE(r.reserved_quantity, 0)
-                )::integer AS available_quantity,
+                COALESCE(i.reserved_quantity, 0)::integer AS reserved_quantity,
+                (i.quantity - COALESCE(i.reserved_quantity, 0))::integer AS available_quantity,
                 i.updated_at
             FROM machines m
             LEFT JOIN machine_slots ms
@@ -37,12 +34,6 @@ class InventoryRepository {
                 ON ms.slot_id = i.slot_id
             LEFT JOIN products p
                 ON i.product_id = p.product_id
-            LEFT JOIN LATERAL (
-                SELECT SUM(ir.quantity) AS reserved_quantity
-                FROM inventory_reservations ir
-                WHERE ir.inventory_id = i.inventory_id
-                  AND ir.status = 'RESERVED'
-            ) r ON TRUE
             WHERE m.machine_id = $1
             ORDER BY ms.slot_code;
         `;
@@ -67,23 +58,14 @@ class InventoryRepository {
                 p.unit_price,
                 p.status AS product_status,
                 i.quantity,
-                COALESCE(r.reserved_quantity, 0)::integer
-                    AS reserved_quantity,
-                (
-                    i.quantity - COALESCE(r.reserved_quantity, 0)
-                )::integer AS available_quantity,
+                COALESCE(i.reserved_quantity, 0)::integer AS reserved_quantity,
+                (i.quantity - COALESCE(i.reserved_quantity, 0))::integer AS available_quantity,
                 i.updated_at
             FROM machine_slots ms
             LEFT JOIN inventories i
                 ON ms.slot_id = i.slot_id
             LEFT JOIN products p
                 ON i.product_id = p.product_id
-            LEFT JOIN LATERAL (
-                SELECT SUM(ir.quantity) AS reserved_quantity
-                FROM inventory_reservations ir
-                WHERE ir.inventory_id = i.inventory_id
-                  AND ir.status = 'RESERVED'
-            ) r ON TRUE
             WHERE ms.slot_id = $1;
         `;
 
@@ -96,7 +78,7 @@ class InventoryRepository {
     // ==========================================
 
     // Khóa dòng inventory trong transaction.
-    // Tính số lượng đang giữ từ inventory_reservations.
+    // Tính số lượng đang giữ từ cột reserved_quantity trên bảng inventories.
     async getInventoryForUpdate(slotId, productId, client) {
         const sql = `
             SELECT
@@ -104,26 +86,8 @@ class InventoryRepository {
                 i.slot_id,
                 i.product_id,
                 i.quantity,
-                COALESCE(
-                    (
-                        SELECT SUM(ir.quantity)
-                        FROM inventory_reservations ir
-                        WHERE ir.inventory_id = i.inventory_id
-                          AND ir.status = 'RESERVED'
-                    ),
-                    0
-                )::integer AS reserved_quantity,
-                (
-                    i.quantity - COALESCE(
-                        (
-                            SELECT SUM(ir.quantity)
-                            FROM inventory_reservations ir
-                            WHERE ir.inventory_id = i.inventory_id
-                              AND ir.status = 'RESERVED'
-                        ),
-                        0
-                    )
-                )::integer AS available_quantity,
+                COALESCE(i.reserved_quantity, 0)::integer AS reserved_quantity,
+                (i.quantity - COALESCE(i.reserved_quantity, 0))::integer AS available_quantity,
                 ms.machine_id,
                 ms.status AS slot_status,
                 p.status AS product_status
