@@ -637,15 +637,21 @@ function CatalogPage({ products, categories, error, loading, token, onRefresh, o
 
   async function saveProduct(event) {
     event.preventDefault();
-    setBusy(true);
     setFormError('');
     const form = new FormData(event.currentTarget);
+    const rawStatus = form.get('status');
+    const status = rawStatus === null ? 'ACTIVE' : String(rawStatus);
+    if (!['ACTIVE', 'INACTIVE'].includes(status)) {
+      setFormError('Trạng thái chỉ nhận ACTIVE hoặc INACTIVE.');
+      return;
+    }
+    setBusy(true);
     const payload = {
       productName: String(form.get('productName')).trim(),
       categoryId: form.get('categoryId'),
       unitPrice: Number(form.get('unitPrice')),
       description: String(form.get('description')).trim() || null,
-      status: form.get('status'),
+      status,
     };
     try {
       if (productDialog.productId) {
