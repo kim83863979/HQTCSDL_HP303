@@ -1,6 +1,7 @@
 const express = require('express');
 const orderController = require('./order.controller');
 const verifySharedSecret = require('../../middleware/verifySharedSecret');
+const { authenticateToken } = require('../auth/auth.middleware');
 
 const router = express.Router();
 const verifyPaymentWebhook = verifySharedSecret({
@@ -14,10 +15,10 @@ const verifyOrderMaintenance = verifySharedSecret({
   errorCode: 'UNAUTHORIZED_ORDER_MAINTENANCE',
 });
 
-router.post('/', orderController.createOrder);
-router.get('/:orderId', orderController.getOrder);
-router.post('/:orderId/payments', orderController.createPaymentAttempt);
-router.post('/:orderId/cancel', orderController.cancelOrder);
+router.post('/', authenticateToken, orderController.createOrder);
+router.get('/:orderId', authenticateToken, orderController.getOrder);
+router.post('/:orderId/payments', authenticateToken, orderController.createPaymentAttempt);
+router.post('/:orderId/cancel', authenticateToken, orderController.cancelOrder);
 router.post('/:orderId/dispense-result', orderController.recordDispenseResult);
 router.post('/expire', verifyOrderMaintenance, orderController.expireOrders);
 router.post('/payments/:paymentId/callback', verifyPaymentWebhook, orderController.processPaymentCallback);
