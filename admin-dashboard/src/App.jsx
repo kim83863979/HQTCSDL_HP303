@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  apiRequest,
   authApi,
   clearSession,
   dashboardApi,
@@ -9,6 +10,7 @@ import {
   readSession,
   saveSession,
 } from "./api.js";
+import { createOperatorApi, mountOperator } from "../operator.js";
 
 const NAV_ITEMS = [
   { id: "overview", label: "Tổng quan", icon: "grid" },
@@ -464,6 +466,28 @@ function initials(name = "") {
   );
 }
 
+function OperatorModule({ session, onLogout, onSessionExpired }) {
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return undefined;
+
+    void mountOperator(root, {
+      session: { ...session, role: session.user.role },
+      api: createOperatorApi((path, options) =>
+        apiRequest(path, { ...options, token: session.token }),
+      ),
+      onLogout,
+      onLoginRequired: onSessionExpired,
+    });
+
+    return () => root.replaceChildren();
+  }, [session, onLogout, onSessionExpired]);
+
+  return <div ref={rootRef} className="operator-module-host" />;
+}
+
 function App() {
   const [session, setSession] = useState(() => readSession());
   const [checkingSession, setCheckingSession] = useState(
@@ -539,20 +563,19 @@ function App() {
   }, [logout]);
 
   useEffect(() => {
-    if (!session?.token) return undefined;
+    if (!session?.token || session.user.role !== "ADMIN") {
+      setLoading(false);
+      return undefined;
+    }
     let cancelled = false;
     setLoading(true);
     const token = session.token;
     const requests = [
       ["machines", () => dashboardApi.machines(token)],
-      ...(session.user.role === "ADMIN"
-        ? [
-            ["products", () => dashboardApi.products(token)],
-            ["categories", () => dashboardApi.categories(token)],
-            ["users", () => dashboardApi.users(token)],
-            ["alerts", () => dashboardApi.activeAlerts(token)],
-          ]
-        : []),
+      ["products", () => dashboardApi.products(token)],
+      ["categories", () => dashboardApi.categories(token)],
+      ["users", () => dashboardApi.users(token)],
+      ["alerts", () => dashboardApi.activeAlerts(token)],
     ];
     Promise.all(
       requests.map(async ([key, request]) => {
@@ -694,13 +717,9 @@ function App() {
     );
   if (session.user.role === "OPERATOR") {
     return (
-      <OperatorWorkspace
-        user={session.user}
-        token={session.token}
-        machines={data.machines}
-        loading={loading}
-        error={errors.machines}
-        onLogout={() => logout()}
+      <OperatorModule
+        session={session}
+        onLogout={logout}
         onSessionExpired={handleSessionExpired}
       />
     );

@@ -4,7 +4,8 @@ export function mountOperator(root, {
   session,
   api = {},
   onLoginRequired,
-  onForbidden
+  onForbidden,
+  onLogout
 }) {
   const view = document.createElement('section');
   view.className = 'fv-operator';
@@ -17,7 +18,16 @@ export function mountOperator(root, {
     return node;
   };
 
-  append(view, 'h1', 'Tổng quan vận hành');
+  const header = append(view, 'header');
+  header.className = 'fv-operator-header';
+  append(header, 'h1', 'Tổng quan vận hành');
+  const user = append(header, 'div');
+  user.className = 'fv-operator-user';
+  append(user, 'span', 'Không gian Operator');
+  append(user, 'strong', session?.user?.fullname || session?.fullname || '');
+  const logout = append(user, 'button', 'Đăng xuất');
+  logout.type = 'button';
+  logout.onclick = () => onLogout?.();
 
   const status = append(view, 'p');
   status.setAttribute('role', 'status');
@@ -55,6 +65,21 @@ export function mountOperator(root, {
 
     .fv-operator h1 { margin: 0; font-size: 2rem; }
     .fv-operator h2 { font-size: 1.2rem; }
+
+    .fv-operator-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .fv-operator-user {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      color: #53675e;
+    }
 
     .fv-operator article {
       background: white;
@@ -104,6 +129,22 @@ export function mountOperator(root, {
     .fv-operator button:disabled {
       opacity: .5;
       cursor: default;
+    }
+
+    @media (max-width: 640px) {
+      .fv-operator-header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .fv-operator-user {
+        flex-wrap: wrap;
+      }
+
+      .fv-operator th,
+      .fv-operator td {
+        white-space: nowrap;
+      }
     }
   `);
 
@@ -285,22 +326,22 @@ export function mountOperator(root, {
 
       const params = { machineId: machine.id };
       const slotOptions = [...uniqueSlots].map(([id, code]) => ({ id, label: code }));
-      const slotField = ['slotId', 'Cột hàng', 'select', slotOptions];
+      const restockSlotOptions = slotOptions.filter(option =>
+        slots.some(slot => String(slot.id) === String(option.id) && slot.productId)
+      );
+      const unassignedSlotOptions = slotOptions.filter(option =>
+        slots.some(slot => String(slot.id) === String(option.id) && !slot.productId)
+      );
       const productField = ['productId', 'Sản phẩm', 'select', products];
 
       action(detail, 'Bổ sung hàng', 'restock', [
-        slotField,
+        ['slotId', 'Cột hàng', 'select', restockSlotOptions],
         ['quantity', 'Số lượng', 'number'],
         ['note', 'Ghi chú', 'text']
       ], params);
 
-      action(detail, 'Cập nhật giá', 'updatePrice', [
-        productField,
-        ['price', 'Giá mới', 'number']
-      ], params);
-
       action(detail, 'Phân bổ sản phẩm', 'assignProduct', [
-        slotField,
+        ['slotId', 'Cột hàng', 'select', unassignedSlotOptions],
         productField
       ], params);
 
@@ -345,13 +386,13 @@ export function mountOperator(root, {
       if (!blocked && current === requestId) {
         table(
           history,
-          ['Thời điểm', 'Cột hàng', 'Sản phẩm', 'Số lượng', 'Nhân viên'],
+          ['Thời điểm', 'Số khe', 'Tổng số lượng', 'Ghi chú', 'Nhân viên'],
           rows.map(row => [
-            row.createdAt,
-            row.slot,
-            row.product,
-            row.quantity,
-            row.operator
+            row.restockDate,
+            row.itemCount,
+            row.totalAdded,
+            row.notes,
+            row.operatorName
           ])
         );
       }
@@ -406,11 +447,30 @@ export function mountOperator(root, {
   return loadMachines();
 }
 
-// request nhận đường dẫn API và trả về JSON đã đọc từ phản hồi.
-export function createOperatorReadApi(request) {
+// request nhận đường dẫn tương đối với API base URL và tự đính kèm JWT.
+export function createOperatorApi(request) {
+  async function getActiveProducts() {
+    const rows = [];
+    let page = 1;
+    let totalPages = 1;
+
+    do {
+      const params = new URLSearchParams({ page: String(page), limit: '100' });
+      const response = await request(`/products?${params}`);
+      rows.push(...(response.data || []));
+      totalPages = response.pagination?.totalPages || 1;
+      page += 1;
+    } while (page <= totalPages);
+
+    return rows.map(product => ({
+      id: product.productId,
+      label: product.productName
+    }));
+  }
+
   return {
     async listMachines() {
-      const { data } = await request('/api/machines');
+      const { data } = await request('/machines');
 
       return data.map(machine => ({
         id: machine.id,
@@ -428,8 +488,7 @@ export function createOperatorReadApi(request) {
         limit: '20',
         status: 'OPEN'
       });
-
-      const { data } = await request('/api/admin/alerts?' + params);
+      const { data } = await request(`/admin/alerts?${params}`);
 
       return data.map(alert => ({
         type: alert.alertType,
@@ -439,32 +498,52 @@ export function createOperatorReadApi(request) {
     },
 
     async getMachine(id) {
-      const path = '/api/inventory/machines/' + encodeURIComponent(id);
+      const path = `/inventory/machines/${encodeURIComponent(id)}`;
       const { data } = await request(path);
-
-      // Giữ khe trống và bỏ dòng không có khe khi máy chưa được cấu hình.
       const rows = data.filter(row => row.slot_id != null);
-      const products = new Map();
-
-      for (const row of rows) {
-        if (row.product_id) {
-          products.set(row.product_id, {
-            id: row.product_id,
-            label: row.product_name
-          });
-        }
-      }
 
       return {
         slots: rows.map(row => ({
           id: row.slot_id,
           code: row.slot_code,
-          product: row.product_name,
-          quantity: row.quantity,
-          lowStock: row.is_low_stock
+          productId: row.product_id,
+          product: row.product_name || 'Chưa phân bổ',
+          quantity: row.quantity ?? 0,
+          lowStock: row.product_id != null
+            && Number(row.available_quantity ?? row.quantity) <= 3
         })),
-        products: [...products.values()]
+        products: await getActiveProducts()
       };
+    },
+
+    async restock({ machineId, slotId, quantity, note }) {
+      const body = {
+        machineId,
+        items: [{ slotId, quantity }]
+      };
+      if (note?.trim()) body.notes = note.trim();
+
+      return request('/inventory/restocks', {
+        method: 'POST',
+        body: JSON.stringify(body)
+      });
+    },
+
+    async assignProduct({ slotId, productId }) {
+      return request(`/inventory/slots/${encodeURIComponent(slotId)}/product`, {
+        method: 'PUT',
+        body: JSON.stringify({ productId, quantity: 0 })
+      });
+    },
+
+    async listRestocks(machineId) {
+      const params = new URLSearchParams({
+        machineId,
+        page: '1',
+        limit: '20'
+      });
+      const { data } = await request(`/inventory/restocks?${params}`);
+      return data;
     }
   };
 }
