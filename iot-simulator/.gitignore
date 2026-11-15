@@ -1,0 +1,5 @@
+.sim_state/
+__pycache__/
+*.pyc
+.env
+!.env.example
