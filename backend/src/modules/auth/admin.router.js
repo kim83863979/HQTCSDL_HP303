@@ -1,8 +1,8 @@
 const express = require('express');
 const authService = require('./auth.service');
-const { authenticateToken, requirePermissions } = require('./auth.middleware');
+const { authenticateToken, requirePermissions, requireRoles } = require('./auth.middleware');
 const { AuthError } = require('./auth.errors');
-const { UUID_RE } = require('./auth.validation');
+const { UUID_RE, validateRegister } = require('./auth.validation');
 
 const router = express.Router();
 
@@ -14,7 +14,25 @@ router.get('/users', authenticateToken, requirePermissions('MANAGE_USER'), async
   }
 });
 
-router.patch('/users/:userId/role', authenticateToken, requirePermissions('MANAGE_USER'), async (req, res, next) => {
+router.post('/users', authenticateToken, requirePermissions('MANAGE_USER'), requireRoles('ADMIN'), async (req, res, next) => {
+  const validationError = validateRegister(req.body);
+  if (validationError) return res.status(400).json({ message: validationError });
+  if (!['ADMIN', 'OPERATOR'].includes(req.body.role)) {
+    return res.status(400).json({ message: 'role chỉ nhận ADMIN hoặc OPERATOR.' });
+  }
+
+  try {
+    const user = await authService.register(req.body, req.body.role);
+    return res.status(201).json({ message: 'Tạo tài khoản thành công.', user });
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return res.status(error.status).json({ message: error.message });
+    }
+    return next(error);
+  }
+});
+
+router.patch('/users/:userId/role', authenticateToken, requirePermissions('MANAGE_USER'), requireRoles('ADMIN'), async (req, res, next) => {
   const { userId } = req.params;
   if (!UUID_RE.test(userId)) {
     return res.status(400).json({ message: 'userId phải là UUID hợp lệ.' });

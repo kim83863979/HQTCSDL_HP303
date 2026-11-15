@@ -163,6 +163,11 @@ export const dashboardApi = {
   order: (id, token) => apiRequest(`/admin/orders/${encodeURIComponent(id)}`, { token }),
   payments: (query, token) => apiRequest(`/admin/payments?${new URLSearchParams(query)}`, { token }),
   users: (token) => apiRequest('/admin/users', { token }),
+  createUser: (payload, token) => apiRequest('/admin/users', {
+    method: 'POST',
+    token,
+    body: JSON.stringify(payload),
+  }),
   changeRole: (id, role, token) => apiRequest(`/admin/users/${encodeURIComponent(id)}/role`, {
     method: 'PATCH',
     token,

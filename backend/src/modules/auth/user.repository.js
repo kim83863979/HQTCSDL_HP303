@@ -22,14 +22,14 @@ async function findById(userId) {
   return result.rows[0] || null;
 }
 
-async function create({ email, fullname, passwordHash }) {
+async function create({ email, fullname, passwordHash, roleName = 'OPERATOR' }) {
   const result = await pool.query(
     `INSERT INTO users (role_id, email, fullname, password_hash)
      SELECT role_id, $1, $2, $3
      FROM roles
-     WHERE name = 'OPERATOR'
+     WHERE name = $4
      RETURNING user_id`,
-    [email, fullname, passwordHash],
+    [email, fullname, passwordHash, roleName],
   );
   if (!result.rowCount) return null;
   return findById(result.rows[0].user_id);

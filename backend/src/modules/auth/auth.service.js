@@ -16,15 +16,19 @@ function publicUser(user) {
   };
 }
 
-async function register({ email, fullname, password }) {
+async function register({ email, fullname, password }, roleName = 'OPERATOR') {
+  if (!['ADMIN', 'OPERATOR'].includes(roleName)) {
+    throw new AuthError(400, 'role chỉ nhận ADMIN hoặc OPERATOR.');
+  }
   const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
   try {
     const user = await userRepository.create({
       email: email.toLowerCase().trim(),
       fullname: fullname.trim(),
       passwordHash,
+      roleName,
     });
-    if (!user) throw new AuthError(500, 'Không thể gán role OPERATOR cho tài khoản mới.');
+    if (!user) throw new AuthError(500, `Không thể gán role ${roleName} cho tài khoản mới.`);
     return publicUser(user);
   } catch (error) {
     if (error.code === '23505') {

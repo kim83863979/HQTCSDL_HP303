@@ -14,6 +14,7 @@ const hasDatabase = Boolean(process.env.DATABASE_URL);
 const email = `sprint1-${randomUUID()}@example.test`;
 const operatorEmail = `sprint1-operator-${randomUUID()}@example.test`;
 const adminEmail = `sprint1-admin-${randomUUID()}@example.test`;
+const adminCreatedEmail = `admin-created-${randomUUID()}@example.test`;
 const password = 'TestPass123';
 const jwtSecret = process.env.JWT_SECRET || 'freshvend_dev_secret_change_in_production';
 let operatorId;
@@ -42,7 +43,7 @@ after(async () => {
   if (hasDatabase) {
     await pool.query(
       'DELETE FROM users WHERE email = ANY($1::text[])',
-      [[email, operatorEmail, adminEmail]],
+      [[email, operatorEmail, adminEmail, adminCreatedEmail]],
     );
   }
   await pool.end();
@@ -114,6 +115,49 @@ describe('Auth API', () => {
       .get('/api/admin/users')
       .set('Authorization', `Bearer ${operatorToken}`)
       .expect(403);
+    const operatorPermission = await pool.query(
+      `SELECT rp.role_id, rp.permission_id
+       FROM role_permissions rp
+       JOIN roles r ON r.role_id = rp.role_id
+       JOIN permissions p ON p.permission_id = rp.permission_id
+       WHERE r.name = 'OPERATOR' AND p.name = 'MANAGE_USER'`,
+    );
+    let temporaryPermission;
+    if (!operatorPermission.rowCount) {
+      const insertedPermission = await pool.query(
+        `INSERT INTO role_permissions (role_id, permission_id)
+         SELECT r.role_id, p.permission_id
+         FROM roles r CROSS JOIN permissions p
+         WHERE r.name = 'OPERATOR' AND p.name = 'MANAGE_USER'
+         RETURNING role_id, permission_id`,
+      );
+      temporaryPermission = insertedPermission.rows[0];
+    }
+    try {
+      await request(app)
+        .post('/api/admin/users')
+        .set('Authorization', `Bearer ${operatorToken}`)
+        .send({
+          email: adminCreatedEmail,
+          fullname: 'Created By Operator',
+          password,
+          role: 'ADMIN',
+        })
+        .expect(403);
+      await request(app)
+        .patch(`/api/admin/users/${adminId}/role`)
+        .set('Authorization', `Bearer ${operatorToken}`)
+        .send({ role: 'OPERATOR' })
+        .expect(403);
+    } finally {
+      if (temporaryPermission) {
+        await pool.query(
+          `DELETE FROM role_permissions
+           WHERE role_id = $1 AND permission_id = $2`,
+          [temporaryPermission.role_id, temporaryPermission.permission_id],
+        );
+      }
+    }
 
     const adminToken = jwt.sign(
       { email: adminEmail, role: 'OPERATOR' },
@@ -132,6 +176,57 @@ describe('Auth API', () => {
       .expect(200);
     assert.ok(response.body.users.length > 0);
     assert.equal(Object.hasOwn(response.body.users[0], 'password_hash'), false);
+
+    await request(app)
+      .post('/api/admin/users')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        email: adminCreatedEmail,
+        fullname: 'Admin Created User',
+        password,
+        role: 'ADMIN',
+      })
+      .expect(201)
+      .expect(({ body }) => {
+        assert.equal(body.user.email, adminCreatedEmail);
+        assert.equal(body.user.fullname, 'Admin Created User');
+        assert.equal(body.user.role, 'ADMIN');
+        assert.equal(Object.hasOwn(body.user, 'password_hash'), false);
+      });
+
+    const createdUser = await pool.query(
+      'SELECT password_hash FROM users WHERE email = $1',
+      [adminCreatedEmail],
+    );
+    assert.equal(await bcrypt.compare(password, createdUser.rows[0].password_hash), true);
+
+    await request(app)
+      .post('/api/admin/users')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        email: adminCreatedEmail,
+        fullname: 'Duplicate User',
+        password,
+        role: 'OPERATOR',
+      })
+      .expect(409);
+
+    await request(app)
+      .post('/api/admin/users')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        email: `invalid-role-${randomUUID()}@example.test`,
+        fullname: 'Invalid Role User',
+        password,
+        role: 'SUPERADMIN',
+      })
+      .expect(400);
+
+    const createdLogin = await request(app)
+      .post('/api/auth/login')
+      .send({ email: adminCreatedEmail, password })
+      .expect(200);
+    assert.equal(createdLogin.body.user.role, 'ADMIN');
 
     const changedRole = await request(app)
       .patch(`/api/admin/users/${operatorId}/role`)
