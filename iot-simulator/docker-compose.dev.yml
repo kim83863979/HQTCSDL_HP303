@@ -1,0 +1,10 @@
+# Broker MQTT cho dev:  docker compose -f docker-compose.dev.yml up -d
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: freshvend-mosquitto-dev
+    ports:
+      - "127.0.0.1:1883:1883"   # chỉ truy cập được từ chính máy bạn
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
