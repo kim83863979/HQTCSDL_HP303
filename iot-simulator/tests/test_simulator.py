@@ -10,6 +10,7 @@ import unittest
 from typing import Any, Dict, List, Optional
 
 from freshvend_sim.config import SimConfig
+from freshvend_sim.auth import sign_payload, verify_payload
 from freshvend_sim.faults import FaultInjector
 from freshvend_sim.machine import VirtualMachine
 from freshvend_sim.protocol import (
@@ -107,6 +108,24 @@ class ProtocolTests(unittest.TestCase):
         for evil in ("VM#", "a/b", "VM+1", ""):
             with self.assertRaises(ValueError):
                 Topics.for_machine(evil)
+
+
+class MessageAuthTests(unittest.TestCase):
+    def test_signed_message_verifies_and_tampering_is_rejected(self):
+        secret = "test-device-secret-at-least-32-bytes"
+        signed = sign_payload({"commandId": "c1", "quantity": 1}, secret)
+        self.assertTrue(verify_payload(signed, secret))
+        signed["quantity"] = 2
+        self.assertFalse(verify_payload(signed, secret))
+
+    def test_simulator_rejects_unsigned_mqtt_commands_when_secret_is_configured(self):
+        h = Harness(iot_secret="test-device-secret-at-least-32-bytes")
+        h.send(h.command([item("A01")]))
+        self.assertEqual(h.results()[0]["errorCode"], "UNAUTHENTICATED_MESSAGE")
+        signed = sign_payload(h.command([item("A01")], command_id="signed", order_id="signed-order"),
+                              h.cfg.iot_secret)
+        h.send(signed)
+        self.assertTrue(h.machine._queue.qsize())
 
 
 class DispenseTests(unittest.TestCase):
@@ -327,6 +346,14 @@ class SensorTests(unittest.TestCase):
         self.assertTrue(3.5 <= t["temperature"] <= 6.5)
         self.assertEqual(h.broker.messages_on(h.topics.telemetry)[0]["machineCode"], CODE)
 
+    def test_telemetry_reports_transport_offline_separately_from_internal_state(self):
+        h = Harness(iot_secret="test-device-secret-at-least-32-bytes")
+        h.transport.simulate_network_loss()
+        payload = h.machine.build_telemetry(h.machine.sample_sensors())
+        self.assertEqual(payload["connectionStatus"], "OFFLINE")
+        self.assertEqual(payload["machineState"], "OFFLINE")
+        self.assertEqual(payload["internalState"], "IDLE")
+
     def test_sensor_fault_holds_last_value_then_flags_fault_after_threshold(self):
         h = Harness()
         good = h.machine.sample_sensors()["temperature"]
@@ -392,6 +419,7 @@ class OfflineTests(unittest.TestCase):
         self.assertEqual(len(h.alerts()), 1)
         flushed = h.broker.messages_on(h.topics.telemetry)
         self.assertTrue(flushed[0]["buffered"])
+        self.assertTrue(verify_payload(flushed[0], h.cfg.iot_secret))
         snap = h.machine.snapshot()
         self.assertEqual((snap["outbox"], snap["telemetryBuffer"]), (0, 0))
         self.assertEqual(json.loads(h.broker.retained[h.topics.status])["status"], "ONLINE")

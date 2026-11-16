@@ -291,6 +291,23 @@ const Machine = {
     };
   },
 
+  recordSimulatorConnection: async (machineId, { connectionStatus, operationStatus }) => {
+    const result = await pool.query(
+      `INSERT INTO public.machine_statuses
+         (machine_id, connection_status, operation_status, health_status,
+          door_status, last_seen_at)
+       VALUES ($1, $2, $3, 'NORMAL', 'CLOSED', CURRENT_TIMESTAMP)
+       ON CONFLICT (machine_id) DO UPDATE SET
+         connection_status = EXCLUDED.connection_status,
+         operation_status = EXCLUDED.operation_status,
+         last_seen_at = EXCLUDED.last_seen_at,
+         updated_at = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [machineId, connectionStatus, operationStatus],
+    );
+    return result.rows[0];
+  },
+
   /** [SPRINT 1] Ghi nhận trạng thái mới từ IoT Simulator. */
   recordSimulatorStatus: async (machineId, payload) => {
     const {

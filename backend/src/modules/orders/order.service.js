@@ -1,5 +1,6 @@
 const { AppError } = require('../products/product.errors');
 const orderRepository = require('./order.repository');
+const dispenseService = require('../iot/dispense.service');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PAYMENT_METHODS = new Set(['CASH', 'CARD', 'QR']);
@@ -274,7 +275,16 @@ async function processPaymentCallback(paymentId, callback = {}) {
           [paymentId, transactionReference],
         );
       }
-      return { id: paymentId, orderId: order.order_id, status: payment.payment_status, idempotent: true };
+      const commandId = payment.payment_status === 'SUCCESS' && order.order_status === 'PAID'
+        ? await dispenseService.enqueuePaidOrder(client, order.order_id)
+        : null;
+      return {
+        id: paymentId,
+        orderId: order.order_id,
+        status: payment.payment_status,
+        commandId,
+        idempotent: true,
+      };
     }
 
     if (payment.payment_status !== 'PENDING'
@@ -294,11 +304,15 @@ async function processPaymentCallback(paymentId, callback = {}) {
        RETURNING payment_id, order_id, payment_status, transaction_reference`,
       [paymentId, rawStatus, transactionReference || null],
     );
+    const commandId = rawStatus === 'SUCCESS'
+      ? await dispenseService.enqueuePaidOrder(client, result.rows[0].order_id)
+      : null;
     return {
       id: result.rows[0].payment_id,
       orderId: result.rows[0].order_id,
       status: result.rows[0].payment_status,
       transactionReference: result.rows[0].transaction_reference,
+      commandId,
       idempotent: false,
     };
   });
@@ -320,34 +334,6 @@ async function cancelOrder(orderId) {
   });
 }
 
-async function recordDispenseResult(orderId, succeeded) {
-  requireUuid(orderId, 'orderId');
-  if (typeof succeeded !== 'boolean') throw new AppError(400, 'success phải là boolean.');
-  return orderRepository.withTransaction(async (client) => {
-    const order = await orderRepository.findOrder(client, orderId, { lock: true });
-    if (!order) throw new AppError(404, 'Không tìm thấy đơn hàng.');
-    const targetStatus = succeeded ? 'COMPLETED' : 'FAILED';
-    if (order.order_status === targetStatus) {
-      return orderRepository.findOrderDetails(client, orderId);
-    }
-    if (order.order_status !== 'PAID' && order.order_status !== 'DISPENSING') {
-      conflict('Chỉ đơn PAID hoặc DISPENSING mới nhận kết quả xuất hàng.');
-    }
-    if (order.order_status === 'PAID') {
-      await client.query(
-        `UPDATE orders SET order_status = 'DISPENSING', updated_at = CURRENT_TIMESTAMP
-         WHERE order_id = $1`,
-        [orderId],
-      );
-    }
-    await client.query(
-      'UPDATE orders SET order_status = $2, updated_at = CURRENT_TIMESTAMP WHERE order_id = $1',
-      [orderId, targetStatus],
-    );
-    return orderRepository.findOrderDetails(client, orderId);
-  });
-}
-
 async function expireOrders() {
   return orderRepository.withTransaction((client) => orderRepository.expirePendingOrders(client));
 }
@@ -358,6 +344,6 @@ module.exports = {
   createPaymentAttempt,
   processPaymentCallback,
   cancelOrder,
-  recordDispenseResult,
+  processDispenseResult: dispenseService.processDispenseResult,
   expireOrders,
 };

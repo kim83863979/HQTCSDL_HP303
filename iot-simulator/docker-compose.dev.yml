@@ -7,4 +7,8 @@ services:
       - "127.0.0.1:1883:1883"   # chỉ truy cập được từ chính máy bạn
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
     restart: unless-stopped
+
+volumes:
+  mosquitto-data:

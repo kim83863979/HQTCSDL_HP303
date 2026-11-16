@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -45,6 +46,7 @@ class SimConfig:
     telemetry_transport: str = "mqtt"        # mqtt | http | both
     backend_url: str = "http://localhost:3000"
     iot_secret: Optional[str] = None
+    require_message_auth: bool = False
     min_temp: float = 2.0
     max_temp: float = 8.0
     temp_lock_after: float = 300.0           # giây vượt ngưỡng liên tục trước khi khóa bán hàng (ERR-06)
@@ -72,13 +74,17 @@ class SimConfig:
         cfg = cls()
         cfg.machine_code = os.getenv("MACHINE_CODE", cfg.machine_code)
         cfg.broker_host = os.getenv("MQTT_HOST", cfg.broker_host)
-        cfg.broker_port = int(os.getenv("MQTT_PORT", cfg.broker_port))
+        try:
+            cfg.broker_port = int(os.getenv("MQTT_PORT", cfg.broker_port))
+        except ValueError as exc:
+            raise ValueError("MQTT_PORT phải là số nguyên.") from exc
         cfg.username = os.getenv("MQTT_USERNAME") or None
         cfg.password = os.getenv("MQTT_PASSWORD") or None
         cfg.use_tls = env_bool("MQTT_TLS", cfg.use_tls)
         cfg.topic_prefix = os.getenv("MQTT_TOPIC_PREFIX", cfg.topic_prefix)
         cfg.backend_url = os.getenv("BACKEND_URL", cfg.backend_url)
         cfg.iot_secret = os.getenv("IOT_DEVICE_SECRET") or None
+        cfg.require_message_auth = os.getenv("NODE_ENV", "").lower() == "production"
         return cfg
 
     def validate(self) -> "SimConfig":
@@ -90,10 +96,31 @@ class SimConfig:
             raise ValueError("telemetry_transport phải là mqtt, http hoặc both.")
         if not 0 < self.broker_port < 65536:
             raise ValueError("broker_port không hợp lệ.")
+        numeric_values = {
+            "telemetry_interval": self.telemetry_interval,
+            "time_scale": self.time_scale,
+            "min_temp": self.min_temp,
+            "max_temp": self.max_temp,
+            "temp_lock_after": self.temp_lock_after,
+            "jam_rate": self.jam_rate,
+            "motor_min": self.motor_min,
+            "motor_max": self.motor_max,
+            "drop_window": self.drop_window,
+            "drop_detect_delay": self.drop_detect_delay,
+            "inter_item_pause": self.inter_item_pause,
+        }
+        if any(not math.isfinite(value) for value in numeric_values.values()):
+            raise ValueError("Các giá trị cấu hình dạng số phải hữu hạn.")
         if self.telemetry_interval <= 0 or self.time_scale <= 0:
             raise ValueError("telemetry_interval và time_scale phải > 0.")
         if self.min_temp >= self.max_temp:
             raise ValueError("min_temp phải nhỏ hơn max_temp.")
+        if self.iot_secret and len(self.iot_secret.encode("utf-8")) < 32:
+            raise ValueError("IOT_DEVICE_SECRET phải có ít nhất 32 byte.")
+        if self.require_message_auth and not self.iot_secret:
+            raise ValueError("IOT_DEVICE_SECRET là bắt buộc khi NODE_ENV=production.")
+        if self.telemetry_transport in {"http", "both"} and not self.iot_secret:
+            raise ValueError("IOT_DEVICE_SECRET là bắt buộc khi gửi telemetry qua HTTP.")
         if not 0 <= self.jam_rate <= 1:
             raise ValueError("jam_rate phải trong [0, 1].")
         if self.motor_min <= 0 or self.motor_min > self.motor_max:

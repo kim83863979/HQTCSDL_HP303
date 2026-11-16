@@ -32,7 +32,7 @@ mosquitto_pub -h localhost -q 1 -t 'freshvend/VM001/commands/dispense' -m '{
 
 Với `--time-scale 0.1` mọi thời gian chờ nhanh gấp 10 lần; `--seed 7` làm phần ngẫu nhiên lặp lại được.
 
-## 2. Hợp đồng MQTT (cần KIM xác nhận — xem mục 9)
+## 2. Hợp đồng MQTT
 
 Tiền tố topic mặc định `freshvend` (`--topic-prefix` / `MQTT_TOPIC_PREFIX`). `{machineCode}` viết HOA, ví dụ `VM001`.
 
@@ -46,7 +46,11 @@ Tiền tố topic mặc định `freshvend` (`--topic-prefix` / `MQTT_TOPIC_PREF
 | `freshvend/{machineCode}/commands/control` | Backend → Sim | 1 | không | `CLEAR_FAULT` (Operator/Admin) |
 | `freshvend/{machineCode}/events/control-result` | Sim → Backend | 1 | không | Xác nhận lệnh điều khiển |
 
-Ba topic đầu là phần Sprint 3 đề xuất; `status`, `alert`, `control` là phần mở rộng (Backend có thể bỏ qua nếu chưa cần).
+Backend hiện publish DISPENSE và subscribe các topic kết quả, telemetry, trạng
+thái, cảnh báo, và kết quả điều khiển. Bản tin MQTT được ký HMAC-SHA256 bằng
+`IOT_DEVICE_SECRET`; cấu hình cùng một secret cho Backend và Simulator. Trong
+production, Backend bắt buộc TLS, broker username/password và secret tối thiểu
+32 byte.
 
 ### 2.1 Lệnh `commands/dispense`
 
@@ -68,6 +72,9 @@ Khớp trường `mqttDispensePayload` mà `GET /api/machines/orders/:orderId/di
 Simulator kiểm tra: JSON object ≤ 64 KB; `commandId`, `orderId` bắt buộc (chuỗi hoặc số nguyên); `machineCode` nếu có phải trùng máy này;
 `items` 1–50 dòng; `columnId` dạng `A01`/`A1` (chuẩn hóa về `A01` để so khớp); `quantity` nguyên 1–100.
 `slotId`, `productId`, `machineId` chỉ được **echo lại** trong kết quả.
+Backend phát `commandId`, `orderId`, `machineId`, `slotId` và `productId` theo
+UUID từ database; chữ ký `signature` được thêm khi publish nên không cần đặt
+trường này trong command payload lưu trong database.
 
 ### 2.2 Kết quả `events/dispense-result`
 
@@ -99,6 +106,9 @@ Simulator kiểm tra: JSON object ≤ 64 KB; `commandId`, `orderId` bắt buộc
 - `items[].status`: `SUCCESS` · `FAILED` (kẹt giữa chừng) · `REJECTED` (bị từ chối ở bước kiểm tra, chưa quay motor) · `SKIPPED` (chưa xử lý vì món trước lỗi).
 - `replayed: true`: đây là bản gửi lại kết quả cũ do nhận lệnh trùng, **motor không quay lần hai**.
 - `commandId`/`orderId`/`machineCode` luôn giữ nguyên như lệnh để Backend đối chiếu.
+- Backend kiểm tra command/order/machine/slot/product/quantity trước khi ghi
+  nhận kết quả. Kết quả trùng được xử lý idempotent; kết quả mâu thuẫn bị từ
+  chối. Trường `replayed` của Simulator không thay đổi nội dung đối soát.
 
 Mã lỗi `errorCode`:
 
@@ -140,6 +150,9 @@ Tương thích bản tin Sprint 1 (Backend `POST /api/machines/simulator/status`
 
 `machineState` luôn thuộc tập Backend chấp nhận (`IDLE, BUSY, DISPENSING, ERROR, MAINTENANCE, OFFLINE`); `internalState` là trạng thái chi tiết.
 Khi cảm biến hỏng: `temperature: null`, `sensorStatus: "FAULT"`. Bản tin được lưu đệm khi offline và gửi bù sẽ có thêm `"buffered": true`.
+MQTT telemetry có chữ ký HMAC. HTTP fallback dùng `POST
+/api/machines/simulator/status`, header `x-iot-key` và cùng `IOT_DEVICE_SECRET`;
+spool bền vững và retry/backoff giữ các bản tin khi Backend tạm ngừng.
 
 ### 2.5 Điều khiển `commands/control`
 
@@ -212,7 +225,15 @@ Hoặc khởi động sẵn lỗi: `python simulator.py --jam-slot A02`.
 | 9 | `temp` | 9.8°C kéo dài | `MACHINE_LOCKED`, tự mở khi về bình thường |
 | 10 | `offline` | Mất mạng giữa chừng | Kết quả lưu đệm rồi đồng bộ lại (chỉ broker giả) |
 
-### Demo cùng Backend thật (khi KIM đã có MQTT publisher/subscriber)
+### Chạy cùng Backend thật
+
+Khởi chạy PostgreSQL, chạy `backend` migrations, Mosquitto, Backend với
+`MQTT_ENABLED=true`, rồi Simulator. Đảm bảo mã máy và slot codes khớp dữ liệu
+database, và `IOT_DEVICE_SECRET` giống nhau ở Backend/Simulator. Sau khi tạo
+đơn và thanh toán, payment provider gọi
+`POST /api/orders/payments/:paymentId/callback` với header `x-payment-key` và
+`{"status":"SUCCESS"}`. Chỉ khi callback xác nhận thành công, Backend tạo
+outbox command; kết quả được xem qua `GET /api/orders/:orderId`.
 
 - **Thành công:** `python simulator.py` → tạo đơn, thanh toán SUCCESS → Backend publish lệnh → simulator trả `DISPENSE_SUCCESS` → đơn `COMPLETED`.
 - **Thất bại:** `python simulator.py --jam-slot A01` (hoặc `jam A01` trong console) với đơn mua sản phẩm ở khe A01 → `DISPENSE_FAILED` → đơn `FAILED`, tồn kho được hoàn.
@@ -232,28 +253,44 @@ tests/test_simulator.py      37 unit test
 
 ## 7. Trạng thái kiểm thử
 
-- 37 unit test + 10 kịch bản demo đạt trên broker giả trong bộ nhớ; đã kiểm tra thêm bằng cách phá thử logic để chắc test bắt được lỗi.
-- Luồng `simulator.py → PahoTransport` đã chạy thử với **stub** mô phỏng API paho 2.x (kết nối, subscribe, LWT, status retained, kết quả).
-  **Chưa chạy với Mosquitto thật** (môi trường phát triển phần này không có mạng để cài paho-mqtt/broker) — cần chạy `python demo.py --broker-host localhost` một lần trên máy nhóm trước khi tích hợp.
-- Chưa kiểm thử tải/độ trễ NFR-P05 (≤ 3s từ lệnh tới khi motor chạy) trên broker thật; về mặt thiết kế motor chạy ngay khi lệnh được lấy khỏi hàng đợi.
+- 40/40 Simulator unit tests đạt với `python -m unittest discover -s tests -v`.
+- 49/49 Backend tests đạt với `npm test`; bao gồm order, payment, database
+  reservation, full/partial dispense result, idempotency và tồn kho trên
+  PostgreSQL đang cấu hình.
+- Migration `20261115210000_dispense_mqtt_workflow.sql` và các migration
+  điều chỉnh trigger fulfillment đã được áp dụng; xác minh bằng
+  `npm run db:migrate:status`.
+- Chưa xác minh MQTT end-to-end qua Mosquitto: Docker CLI có nhưng Docker Engine
+  chưa chạy và không tìm thấy `mosquitto`/`mosquitto_pub` cài cục bộ trong môi
+  trường kiểm thử này. Vì vậy không tuyên bố luồng Broker–Backend–Simulator đã
+  vượt qua integration test thực tế; cũng chưa đo NFR-P05 trên broker thật.
 
 ## 8. Ngoài phạm vi Sprint này
 
 Điều khiển phần cứng thật; nhiều máy trong một tiến trình (chạy mỗi máy một tiến trình với `--machine` khác nhau); kiểm tra độ cũ của lệnh qua `timestamp`; đếm tồn kho vật lý trong simulator (Backend mới là nguồn dữ liệu tồn kho).
 
-## 9. Cần thống nhất với KIM / vấn đề còn tồn
+## 9. Tích hợp Backend: trạng thái và giới hạn
 
-1. **Topic và tên sự kiện.** README Sprint 3 đề xuất `freshvend/{machineCode}/commands/dispense` & `.../events/dispense-result` với `DISPENSE_SUCCESS/FAILED` (simulator đang dùng).
-   Tài liệu thiết kế 2.4.4 lại ghi `freshvend/machines/{id}/cmd/dispense` & `evt/dispense` với `DISPENSED/DISPENSE_JAM`. Cần chốt một bản; đổi ở `freshvend_sim/protocol.py` (`Topics`, hằng `EVENT_*`) và mục 2 này.
-2. **Backend chưa có MQTT client** (`package.json` chưa có thư viện MQTT) — đây là phần của KIM. Trong lúc chờ, chạy `--telemetry-transport both` để dashboard vẫn có telemetry qua HTTP;
-   khi Backend subscribe MQTT, chuyển về `mqtt` để khỏi gửi trùng.
-3. **`commandId` va chạm.** Dispense-plan tạo `cmd_${orderId.slice(0,8)}`: chỉ 8 ký tự đầu của UUID nên hai đơn khác nhau có thể trùng. Simulator đã chặn (`COMMAND_ID_CONFLICT`) nhưng đơn thứ hai sẽ thất bại;
-   đề nghị dùng toàn bộ `orderId` (hoặc UUID mới cho mỗi lệnh) làm `commandId`.
-4. **Kết quả nhả một phần và hoàn kho.** `POST /api/orders/:orderId/dispense-result` chỉ nhận `{ success: boolean }`, và khi đơn chuyển `FAILED` trigger
-   `resolve_order_reservations` đặt **toàn bộ** reservation đã tiêu thụ của đơn về `RESTOCKED` — kể cả món đã nhả thật trước khi kẹt (ví dụ A01 đã rơi, A02 kẹt). Khi đó tồn kho trong DB sẽ lệch so với thực tế.
-   Simulator báo chi tiết từng món trong `items[]` (`dispensedQuantity`); KIM/NGHĨA/NGUYÊN cần quyết định cách xử lý (hoàn tiền/tồn kho phần đã nhả, hoặc Operator đối soát).
-   Ngoài ra `POST /api/orders` chưa kiểm tra `isReadyForOrder` / cột bị khóa, nên đơn vào cột kẹt vẫn được tạo rồi mới thất bại ở bước nhả.
-5. **Backend nhận kết quả** nên (a) đối chiếu `commandId`/`orderId`/`machineCode`, (b) bỏ qua bản tin `replayed: true` hoặc xử lý idempotent (hàm `recordDispenseResult` hiện đã idempotent), (c) không hiểu `errorCode` nào thì coi là thất bại.
-6. **Gửi lệnh khi máy offline** sẽ mất (session sạch); Backend cần timeout + gửi lại (ERR-03). Lệnh được gửi lại là an toàn nhờ idempotency.
-7. **`CLEAR_FAULT`** cần một nơi gọi (Operator UI của NGUYÊN hoặc Admin của KIM) qua Backend; hiện demo bằng console hoặc `mosquitto_pub`.
-8. Broker dev không xác thực (chỉ bind `127.0.0.1`). Môi trường chung cần cấu hình tài khoản/TLS bên ngoài repository.
+1. Backend có MQTT adapter, đăng ký lại subscription khi reconnect và nhận
+   telemetry, trạng thái máy, dispense-result, alert, control-result. Outbox
+   giữ command trong PostgreSQL, publish QoS 1, kiểm tra heartbeat trước khi
+   dispatch, retry timeout/publish và chuyển quá số lần thử sang `DEAD_LETTER`.
+2. Payment callback SUCCESS tạo duy nhất một command cho order. Backend kiểm
+   tra UUID command/order, machine, slot, product, quantity, và item-level
+   status. Kết quả partial/failure chỉ hoàn tồn phần chưa nhả; payment vẫn
+   `SUCCESS` vì chưa có tích hợp refund provider. Số tiền cần xử lý được lưu
+   trong `refundDueAmount`.
+3. API ghi dispense result và HTTP telemetry yêu cầu `x-iot-key`; production
+   yêu cầu secret đủ mạnh. MQTT message dùng HMAC khi secret được cấu hình;
+   production còn bắt buộc MQTT TLS và thông tin xác thực broker.
+4. `CLEAR_FAULT` được Backend publish qua
+   `POST /api/machines/:id/control` (role Admin/Operator); control result được
+   ghi log. Giao diện Operator chưa có thao tác này thì hiện vẫn có thể dùng
+   console simulator.
+5. Backend unit/API tests và Simulator unit tests đạt, nhưng chưa chạy được
+   integration qua Mosquitto thật tại môi trường này (Docker Engine không hoạt
+   động, không có Mosquitto cục bộ). Trước khi nghiệm thu cần chạy broker thật
+   và xác minh thanh toán → MQTT command → simulator → result → Database, gồm
+   offline/reconnect, partial dispense, duplicate message và restart Backend.
+6. Broker development chỉ bind `127.0.0.1`; không dùng anonymous dev broker
+   trong môi trường chia sẻ/production.

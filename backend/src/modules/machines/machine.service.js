@@ -476,7 +476,7 @@ const getOrderDispensePlan = async (orderIdParam) => {
     totalAmount:      order.totalAmount,
     allocations:      historicalAllocations,
     mqttDispensePayload: {
-      commandId:   `cmd_${order.orderId.slice(0, 8)}`,
+      commandId:   `cmd_${order.orderId}`,
       orderId:     order.orderId,
       machineId:   order.machineId,
       machineCode: resolution.machineCode,
@@ -496,6 +496,7 @@ const receiveSimulatorStatus = async (payload) => {
     machineCode,
     machineState,
     operationStatus,
+    connectionStatus,
     temperature,
     humidity,
     doorStatus = 'CLOSED',
@@ -513,6 +514,12 @@ const receiveSimulatorStatus = async (payload) => {
   const rawOpState = (operationStatus || machineState || 'IDLE').toUpperCase();
   if (!VALID_OPERATION_STATES.includes(rawOpState)) {
     throw new ServiceError(400, 'INVALID_MACHINE_STATE', 'Trạng thái máy không hợp lệ.');
+  }
+  const normalizedConnection = String(
+    connectionStatus || (rawOpState === 'OFFLINE' ? 'OFFLINE' : 'ONLINE'),
+  ).toUpperCase();
+  if (!['ONLINE', 'OFFLINE'].includes(normalizedConnection)) {
+    throw new ServiceError(400, 'INVALID_CONNECTION_STATUS', 'connectionStatus chỉ nhận ONLINE hoặc OFFLINE.');
   }
   const normalizedDoor = String(doorStatus).toUpperCase();
   if (!VALID_DOOR_STATUS.includes(normalizedDoor)) {
@@ -577,7 +584,7 @@ const receiveSimulatorStatus = async (payload) => {
       message: warningMessage,
     });
   }
-  if (rawOpState === 'OFFLINE') {
+  if (normalizedConnection === 'OFFLINE' || rawOpState === 'OFFLINE') {
     alertConditions.push({
       alertType: 'MACHINE_OFFLINE',
       severity: 'CRITICAL',
@@ -593,8 +600,8 @@ const receiveSimulatorStatus = async (payload) => {
   }
 
   const recorded = await Machine.recordSimulatorStatus(machine.id, {
-    connectionStatus: rawOpState === 'OFFLINE' ? 'OFFLINE' : 'ONLINE',
-    operationStatus:  isSensorFault ? 'ERROR' : rawOpState,
+    connectionStatus: normalizedConnection,
+    operationStatus:  normalizedConnection === 'OFFLINE' ? 'OFFLINE' : (isSensorFault ? 'ERROR' : rawOpState),
     healthStatus,
     doorStatus:       normalizedDoor,
     temperature:      parsedTemp,
@@ -616,6 +623,68 @@ const receiveSimulatorStatus = async (payload) => {
   };
 };
 
+const receiveSimulatorConnectionStatus = async (payload) => {
+  const machineCode = typeof payload?.machineCode === 'string'
+    ? payload.machineCode.trim().toUpperCase()
+    : '';
+  const status = String(payload?.status || '').toUpperCase();
+  if (!machineCode || !['ONLINE', 'OFFLINE'].includes(status)) {
+    throw new ServiceError(400, 'INVALID_MACHINE_CONNECTION_STATUS', 'machineCode và status ONLINE/OFFLINE là bắt buộc.');
+  }
+  const machine = await Machine.findByCode(machineCode);
+  if (!machine) throw new ServiceError(404, 'MACHINE_NOT_FOUND', `Không tìm thấy máy '${machineCode}'.`);
+  const operationStatus = status === 'OFFLINE'
+    ? 'OFFLINE'
+    : (VALID_OPERATION_STATES.includes(payload.machineState) ? payload.machineState : 'IDLE');
+  const recorded = await Machine.recordSimulatorConnection(machine.id, {
+    connectionStatus: status,
+    operationStatus,
+  });
+  return { machineId: machine.id, machineCode, connectionStatus: status, status: recorded };
+};
+
+const receiveSimulatorAlert = async (payload) => {
+  const machineCode = typeof payload?.machineCode === 'string'
+    ? payload.machineCode.trim().toUpperCase()
+    : '';
+  const alertCode = typeof payload?.alertCode === 'string' ? payload.alertCode.trim().toUpperCase() : '';
+  const severity = typeof payload?.severity === 'string' ? payload.severity.trim().toUpperCase() : '';
+  const message = typeof payload?.message === 'string' ? payload.message.trim() : '';
+  if (!machineCode || !alertCode || !message
+      || !['INFO', 'WARNING', 'ERROR', 'CRITICAL'].includes(severity)) {
+    throw new ServiceError(400, 'INVALID_DEVICE_ALERT', 'Alert phải có machineCode, alertCode, severity và message hợp lệ.');
+  }
+  const machine = await Machine.findByCode(machineCode);
+  if (!machine) throw new ServiceError(404, 'MACHINE_NOT_FOUND', `Không tìm thấy máy '${machineCode}'.`);
+
+  const alertTypeByCode = {
+    TEMP_OUT_OF_RANGE: 'TEMPERATURE_OUT_OF_RANGE',
+    TEMP_LOCK: 'TEMPERATURE_OUT_OF_RANGE',
+    SENSOR_FAULT: 'SENSOR_FAULT',
+    DOOR_OPEN: 'UNAUTHORIZED_DOOR_OPEN',
+  };
+  await Machine.recordSimulatorStatus(machine.id, {
+    connectionStatus: 'ONLINE',
+    operationStatus: severity === 'CRITICAL' || severity === 'ERROR'
+      ? 'ERROR'
+      : (VALID_OPERATION_STATES.includes(machine.operationStatus) ? machine.operationStatus : 'IDLE'),
+    healthStatus: severity === 'CRITICAL' || severity === 'ERROR' ? 'ERROR' : 'WARNING',
+    doorStatus: machine.doorStatus || 'CLOSED',
+    temperature: machine.temperature,
+    humidity: machine.humidity,
+    errorCode: alertCode,
+    eventType: 'ALERT',
+    severity,
+    errorMessage: message,
+    alertConditions: [{
+      alertType: alertTypeByCode[alertCode] || alertCode,
+      severity,
+      message,
+    }],
+  });
+  return { machineId: machine.id, machineCode, alertCode, severity };
+};
+
 module.exports = {
   ServiceError,
   getAllMachines,
@@ -627,4 +696,6 @@ module.exports = {
   resolveSlotsForOrderItems,
   getOrderDispensePlan,
   receiveSimulatorStatus,
+  receiveSimulatorConnectionStatus,
+  receiveSimulatorAlert,
 };

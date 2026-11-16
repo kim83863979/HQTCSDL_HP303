@@ -1,5 +1,6 @@
 // src/modules/machines/machine.controller.js
 const machineService = require('./machine.service');
+const dispenseService = require('../iot/dispense.service');
 
 const handleControllerError = (res, err, defaultMessage) => {
   if (err instanceof machineService.ServiceError) {
@@ -10,6 +11,13 @@ const handleControllerError = (res, err, defaultMessage) => {
     };
     if (err.details) responseBody.details = err.details;
     return res.status(err.statusCode).json(responseBody);
+  }
+  if (Number.isInteger(err.statusCode) && err.statusCode >= 400 && err.statusCode < 600) {
+    return res.status(err.statusCode).json({
+      success: false,
+      errorCode: err.statusCode === 503 ? 'MQTT_UNAVAILABLE' : 'INVALID_MACHINE_COMMAND',
+      message: err.message,
+    });
   }
   console.error('[MACHINE_CONTROLLER_ERROR]:', err.message);
   return res.status(500).json({
@@ -110,6 +118,16 @@ const receiveSimulatorStatus = async (req, res) => {
   }
 };
 
+const sendControlCommand = async (req, res) => {
+  try {
+    const { action, columnId } = req.body || {};
+    const result = await dispenseService.publishControl(req.params.id, action, columnId);
+    return res.status(202).json({ success: true, message: 'Lệnh điều khiển đã được gửi qua MQTT.', data: result });
+  } catch (err) {
+    return handleControllerError(res, err, 'Lỗi máy chủ khi gửi lệnh điều khiển');
+  }
+};
+
 module.exports = {
   getAllMachines,
   getMachineById,
@@ -120,4 +138,5 @@ module.exports = {
   resolveOrderSlots,
   getOrderDispensePlan,
   receiveSimulatorStatus,
+  sendControlCommand,
 };

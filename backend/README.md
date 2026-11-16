@@ -1,24 +1,36 @@
-# Backend
+# FreshVend Backend
 
-Thư mục này chứa backend API dùng chung. Nhóm cần thống nhất framework và ngôn
-ngữ trước khi thêm mã nguồn phụ thuộc công nghệ.
+Express API backed by PostgreSQL. Database schema changes are managed from
+`database/migrations/`; do not edit the database manually to reproduce a change.
 
-## Phạm vi Sprint 1
+## Setup
 
-- `src/config/`: cấu hình ứng dụng và kết nối PostgreSQL.
-- `src/middleware/`: xác thực request và xử lý lỗi dùng chung.
-- `src/modules/auth/`: User, Role, đăng nhập và kiểm tra quyền cơ bản.
-- `src/modules/products/`: API đọc sản phẩm và danh mục.
-- `src/modules/inventory/`: API đọc tồn kho theo máy/khe.
-- `src/modules/machines/`: thông tin máy và trạng thái cơ bản.
-- `tests/`: kiểm thử module và API nền tảng.
+1. Copy the repository-root `.env.example` to `.env` and set `DATABASE_URL`,
+   `JWT_SECRET`, webhook secrets, and a random `IOT_DEVICE_SECRET` of at least
+   32 bytes. Replace every placeholder before deployment.
+2. Install dependencies with `npm ci`.
+3. Run migrations with `npm run db:migrate`; inspect them with
+   `npm run db:migrate:status`.
+4. Start the API with `npm start`; use `npm run dev` for development.
 
-Mọi module phải dùng schema/migration tại `database/`, theo ERD đã chốt. Không
-tạo schema riêng hoặc sửa quan hệ mà chưa thống nhất với cả nhóm.
+## MQTT order fulfillment
 
-## Cấu hình
+Set `MQTT_ENABLED=true` and configure `MQTT_HOST`, `MQTT_PORT`,
+`MQTT_TOPIC_PREFIX`, and credentials/TLS as required. In production, the
+Backend refuses to start MQTT without TLS, broker credentials, and a strong
+`IOT_DEVICE_SECRET`. The secret is shared with the Simulator and signs MQTT
+payloads with HMAC-SHA256.
 
-Sao chép `.env.example` ở thư mục gốc thành `.env` và điền cấu hình PostgreSQL
-cục bộ. Không đưa `.env` lên Git.
+Only a successful payment callback creates the durable row in
+`dispense_commands`. The outbox publishes at QoS 1, retries if the broker or
+device is unavailable, and reconciles each returned item once. A failed or
+partial dispense records `refundDueAmount`; refund execution is not automated
+because this repository has no payment-provider refund integration.
 
-Lệnh cài đặt, khởi chạy và kiểm thử sẽ được cập nhật khi nhóm chốt framework.
+See `iot-simulator/README.md` for MQTT topics, payload examples, local
+development startup, and integration-test limitations.
+
+## Tests
+
+Run API and database-backed integration tests with `npm test`. These tests use
+the configured PostgreSQL database and should not run against production data.

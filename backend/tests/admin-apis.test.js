@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const request = require('supertest');
 
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
+process.env.IOT_DEVICE_SECRET = 'admin-test-iot-secret-32-bytes-minimum';
 
 const app = require('../app');
 const { pool } = require('../src/config/db');

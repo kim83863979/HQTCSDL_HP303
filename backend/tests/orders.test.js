@@ -1,11 +1,19 @@
 const assert = require('node:assert/strict');
 const { after, before, describe, it } = require('node:test');
 const { randomUUID } = require('node:crypto');
+const jwt = require('jsonwebtoken');
 const request = require('supertest');
 
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
 process.env.PAYMENT_WEBHOOK_SECRET = 'order-test-webhook-secret';
 process.env.ORDER_MAINTENANCE_SECRET = 'order-test-maintenance-secret';
+process.env.IOT_DEVICE_SECRET = 'order-test-iot-secret-32-bytes-minimum';
+const jwtSecret = process.env.JWT_SECRET || 'freshvend_dev_secret_change_in_production';
+const customerToken = jwt.sign(
+  { email: 'order-test@freshvend.com', role: 'CUSTOMER' },
+  jwtSecret,
+  { subject: randomUUID(), expiresIn: '1h' },
+);
 
 const app = require('../app');
 const { pool } = require('../src/config/db');
@@ -24,6 +32,7 @@ let slotForInactiveProduct;
 async function createOrder(items) {
   const response = await request(app)
     .post('/api/orders')
+    .set('Authorization', `Bearer ${customerToken}`)
     .send({ machineId, items });
   if (response.status === 201) fixture.orderIds.push(response.body.data.id);
   return response;
@@ -32,6 +41,7 @@ async function createOrder(items) {
 async function createPayment(orderId) {
   return request(app)
     .post(`/api/orders/${orderId}/payments`)
+    .set('Authorization', `Bearer ${customerToken}`)
     .send({ paymentMethod: 'QR' });
 }
 
@@ -204,7 +214,8 @@ describe('Orders and payment lifecycle', () => {
     assert.equal((await inventoryFor(slotA)).reserved_quantity, 1);
     assert.equal((await sendCallback(retry.body.data.id, 'SUCCESS', `retry-${randomUUID()}`)).status, 200);
 
-    const order = await request(app).get(`/api/orders/${created.body.data.id}`).expect(200);
+    const order = await request(app).get(`/api/orders/${created.body.data.id}`)
+      .set('Authorization', `Bearer ${customerToken}`).expect(200);
     assert.deepEqual(order.body.data.payments.map((entry) => entry.status), ['FAILED', 'SUCCESS']);
   });
 
@@ -220,26 +231,206 @@ describe('Orders and payment lifecycle', () => {
        WHERE order_id = $1`,
       [created.body.data.id],
     );
-    const response = await request(app).get(`/api/orders/${created.body.data.id}`).expect(200);
+    const response = await request(app).get(`/api/orders/${created.body.data.id}`)
+      .set('Authorization', `Bearer ${customerToken}`).expect(200);
     assert.equal(response.body.data.status, 'CANCELLED');
     assert.equal((await inventoryFor(slotA)).reserved_quantity, 0);
   });
 
   it('restores stock when a successfully paid order cannot be dispensed', async () => {
     const beforeStock = await inventoryFor(slotA);
+    const slot = await pool.query('SELECT slot_code FROM machine_slots WHERE slot_id = $1', [slotA]);
     const created = await createOrder([
       { productId: productA, slotId: slotA, quantity: 1 },
     ]);
     const payment = await createPayment(created.body.data.id);
     assert.equal((await sendCallback(payment.body.data.id, 'SUCCESS', `dispense-${randomUUID()}`)).status, 200);
 
+    const command = await pool.query(
+      'SELECT command_id FROM dispense_commands WHERE order_id = $1',
+      [created.body.data.id],
+    );
+    assert.equal(command.rowCount, 1);
+    const unauthenticated = await request(app)
+      .post(`/api/orders/${created.body.data.id}/dispense-result`)
+      .send({});
+    assert.equal(unauthenticated.status, 401);
+
     const failedDispense = await request(app)
       .post(`/api/orders/${created.body.data.id}/dispense-result`)
-      .send({ success: false })
-      .expect(200);
+      .set('x-iot-key', process.env.IOT_DEVICE_SECRET)
+      .send({
+        commandId: command.rows[0].command_id,
+        orderId: created.body.data.id,
+        machineCode: 'VM001',
+        machineId,
+        eventCode: 'DISPENSE_FAILED',
+        status: 'FAILED',
+        items: [{
+          columnId: slot.rows[0].slot_code,
+          slotId: slotA,
+          productId: productA,
+          quantity: 1,
+          dispensedQuantity: 0,
+          status: 'REJECTED',
+          retryCount: 0,
+          errorCode: 'OUT_OF_STOCK',
+        }],
+      });
+    assert.equal(failedDispense.status, 200, JSON.stringify(failedDispense.body));
     assert.equal(failedDispense.body.data.status, 'FAILED');
+    assert.equal(failedDispense.body.data.refundDueAmount, 3.25);
     assert.equal((await inventoryFor(slotA)).quantity, beforeStock.quantity);
     assert.equal((await inventoryFor(slotA)).reserved_quantity, 0);
+    const [orderStatus, paymentStatus] = await Promise.all([
+      pool.query('SELECT order_status FROM orders WHERE order_id = $1', [created.body.data.id]),
+      pool.query(
+        'SELECT payment_status FROM payments WHERE order_id = $1 ORDER BY created_at DESC LIMIT 1',
+        [created.body.data.id],
+      ),
+    ]);
+    assert.equal(orderStatus.rows[0].order_status, 'FAILED');
+    assert.equal(paymentStatus.rows[0].payment_status, 'SUCCESS');
+    assert.equal((await request(app)
+      .post(`/api/orders/${created.body.data.id}/dispense-result`)
+      .set('x-iot-key', process.env.IOT_DEVICE_SECRET)
+      .send({
+        commandId: command.rows[0].command_id,
+        orderId: created.body.data.id,
+        machineCode: 'VM001',
+        machineId,
+        eventCode: 'DISPENSE_FAILED',
+        status: 'FAILED',
+        items: [{
+          columnId: slot.rows[0].slot_code,
+          slotId: slotA,
+          productId: productA,
+          quantity: 1,
+          dispensedQuantity: 0,
+          status: 'REJECTED',
+          retryCount: 0,
+          errorCode: 'OUT_OF_STOCK',
+        }],
+      })).body.data.status, 'FAILED');
+  });
+
+  it('reconciles partial dispense exactly once and only restocks undispensed units', async () => {
+    const beforeStock = await inventoryFor(slotA);
+    const slot = await pool.query('SELECT slot_code FROM machine_slots WHERE slot_id = $1', [slotA]);
+    const created = await createOrder([
+      { productId: productA, slotId: slotA, quantity: 2 },
+    ]);
+    const payment = await createPayment(created.body.data.id);
+    await sendCallback(payment.body.data.id, 'SUCCESS', `partial-${randomUUID()}`);
+    const command = await pool.query(
+      'SELECT command_id FROM dispense_commands WHERE order_id = $1',
+      [created.body.data.id],
+    );
+    const result = {
+      commandId: command.rows[0].command_id,
+      orderId: created.body.data.id,
+      machineCode: 'VM001',
+      machineId,
+      eventCode: 'DISPENSE_FAILED',
+      status: 'FAILED',
+      items: [{
+        columnId: slot.rows[0].slot_code,
+        slotId: slotA,
+        productId: productA,
+        quantity: 2,
+        dispensedQuantity: 1,
+        status: 'FAILED',
+        retryCount: 2,
+        errorCode: 'DISPENSE_JAM',
+      }],
+    };
+    const endpoint = `/api/orders/${created.body.data.id}/dispense-result`;
+    const first = await request(app).post(endpoint)
+      .set('x-iot-key', process.env.IOT_DEVICE_SECRET).send(result);
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    assert.equal(first.body.data.items[0].dispensedQuantity, 1);
+    assert.equal(first.body.data.refundDueAmount, 3.25);
+    assert.equal((await inventoryFor(slotA)).quantity, beforeStock.quantity - 1);
+    const duplicate = await request(app).post(endpoint)
+      .set('x-iot-key', process.env.IOT_DEVICE_SECRET).send(result);
+    assert.equal(duplicate.status, 200, JSON.stringify(duplicate.body));
+    assert.equal((await inventoryFor(slotA)).quantity, beforeStock.quantity - 1);
+  });
+
+  it('rejects duplicate item results and results without the matching machine ID', async () => {
+    const additionalSlot = await pool.query(
+      `INSERT INTO machine_slots (machine_id, slot_code, capacity)
+       VALUES ($1, $2, 4) RETURNING slot_id`,
+      [machineId, `V${randomUUID().slice(0, 6).toUpperCase()}`],
+    );
+    const additionalSlotId = additionalSlot.rows[0].slot_id;
+    fixture.slotIds.push(additionalSlotId);
+    await pool.query(
+      'INSERT INTO inventories (slot_id, product_id, quantity) VALUES ($1, $2, 3)',
+      [additionalSlotId, productB],
+    );
+    const created = await createOrder([
+      { productId: productA, slotId: slotA, quantity: 1 },
+      { productId: productB, slotId: additionalSlotId, quantity: 1 },
+    ]);
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const payment = await createPayment(created.body.data.id);
+    await sendCallback(payment.body.data.id, 'SUCCESS', `result-validation-${randomUUID()}`);
+    const command = await pool.query(
+      'SELECT command_id FROM dispense_commands WHERE order_id = $1',
+      [created.body.data.id],
+    );
+    const slot = await pool.query('SELECT slot_code FROM machine_slots WHERE slot_id = $1', [slotA]);
+    const duplicateItem = {
+      columnId: slot.rows[0].slot_code,
+      slotId: slotA,
+      productId: productA,
+      quantity: 1,
+      dispensedQuantity: 1,
+      status: 'SUCCESS',
+      retryCount: 0,
+      errorCode: null,
+    };
+    const endpoint = `/api/orders/${created.body.data.id}/dispense-result`;
+    const duplicate = await request(app)
+      .post(endpoint)
+      .set('x-iot-key', process.env.IOT_DEVICE_SECRET)
+      .send({
+        commandId: command.rows[0].command_id,
+        orderId: created.body.data.id,
+        machineCode: 'VM001',
+        machineId,
+        eventCode: 'DISPENSE_SUCCESS',
+        status: 'SUCCESS',
+        items: [duplicateItem, duplicateItem],
+      });
+    assert.equal(duplicate.status, 400);
+
+    const missingMachine = await request(app)
+      .post(endpoint)
+      .set('x-iot-key', process.env.IOT_DEVICE_SECRET)
+      .send({
+        commandId: command.rows[0].command_id,
+        orderId: created.body.data.id,
+        machineCode: 'VM001',
+        eventCode: 'DISPENSE_SUCCESS',
+        status: 'SUCCESS',
+        items: [duplicateItem, {
+          ...duplicateItem,
+          columnId: (await pool.query(
+            'SELECT slot_code FROM machine_slots WHERE slot_id = $1', [additionalSlotId],
+          )).rows[0].slot_code,
+          slotId: additionalSlotId,
+          productId: productB,
+        }],
+      });
+    assert.equal(missingMachine.status, 409);
+
+    const itemStates = await pool.query(
+      'SELECT dispense_status FROM order_items WHERE order_id = $1 ORDER BY slot_id',
+      [created.body.data.id],
+    );
+    assert.ok(itemStates.rows.every((item) => item.dispense_status === 'PENDING'));
   });
 
   it('rejects inactive products, inactive slots, and empty order requests', async () => {
@@ -252,8 +443,10 @@ describe('Orders and payment lifecycle', () => {
     assert.equal((await createOrder([
       { productId: productB, slotId: slotA, quantity: 1 },
     ])).status, 400);
-    assert.equal((await request(app).post('/api/orders').send({ machineId, items: [] })).status, 400);
-    assert.equal((await request(app).post('/api/orders').send(null)).status, 400);
+    assert.equal((await request(app).post('/api/orders')
+      .set('Authorization', `Bearer ${customerToken}`).send({ machineId, items: [] })).status, 400);
+    assert.equal((await request(app).post('/api/orders')
+      .set('Authorization', `Bearer ${customerToken}`).send(null)).status, 400);
   });
 
   it('rejects stock quantities above slot capacity', async () => {
@@ -285,9 +478,11 @@ describe('Orders and payment lifecycle', () => {
 
     const payment = await request(app)
       .post('/api/payments')
+      .set('Authorization', `Bearer ${customerToken}`)
       .send({ orderId: created.body.data.id, paymentMethod: 'QR' })
       .expect(201);
     const paymentId = payment.body.data.paymentId;
+    const slot = await pool.query('SELECT slot_code FROM machine_slots WHERE slot_id = $1', [slotA]);
 
     await request(app)
       .post(`/api/payments/${paymentId}/result`)
@@ -296,11 +491,39 @@ describe('Orders and payment lifecycle', () => {
 
     const settled = await request(app)
       .post(`/api/payments/${paymentId}/result`)
+      .set('Authorization', `Bearer ${customerToken}`)
       .set('x-payment-key', process.env.PAYMENT_WEBHOOK_SECRET)
       .send({ paymentStatus: 'SUCCESS', transactionReference: `alias-${randomUUID()}` })
       .expect(200);
     assert.equal(settled.body.data.orderStatus, 'PAID');
     assert.equal((await inventoryFor(slotA)).quantity, beforeStock.quantity - 1);
+    const command = await pool.query(
+      'SELECT command_id FROM dispense_commands WHERE order_id = $1',
+      [created.body.data.id],
+    );
+    const result = await request(app)
+      .post(`/api/orders/${created.body.data.id}/dispense-result`)
+      .set('x-iot-key', process.env.IOT_DEVICE_SECRET)
+      .send({
+        commandId: command.rows[0].command_id,
+        orderId: created.body.data.id,
+        machineCode: 'VM001',
+        machineId,
+        eventCode: 'DISPENSE_SUCCESS',
+        status: 'SUCCESS',
+        items: [{
+          columnId: slot.rows[0].slot_code,
+          slotId: slotA,
+          productId: productA,
+          quantity: 1,
+          dispensedQuantity: 1,
+          status: 'SUCCESS',
+          retryCount: 0,
+          errorCode: null,
+        }],
+      })
+      .expect(200);
+    assert.equal(result.body.data.status, 'COMPLETED');
     assert.equal((await inventoryFor(slotA)).reserved_quantity, 0);
   });
 

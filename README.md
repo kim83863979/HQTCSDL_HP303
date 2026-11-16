@@ -1,8 +1,7 @@
 # FreshVend
 
-FreshVend là dự án máy bán trái cây tự động, hướng đến quản lý sản phẩm, tồn kho,
-tài khoản và trạng thái máy. Phạm vi Sprint 1 là dựng nền tảng backend và database,
-đăng nhập cơ bản, các API nền tảng và khung IoT Simulator.
+FreshVend là hệ thống máy bán trái cây tự động, gồm Backend API, PostgreSQL,
+giao diện quản trị/khách hàng và IoT Simulator giao tiếp với Backend qua MQTT.
 
 ## Cấu trúc dự án
 
@@ -13,22 +12,23 @@ tài khoản và trạng thái máy. Phạm vi Sprint 1 là dựng nền tảng 
 - `admin-dashboard/`: giao diện Admin/Operator, triển khai ở sprint sau.
 - `mô tả dự án/`: tài liệu mô tả và phân công dự án hiện có.
 
-## Bắt đầu
+## Chạy Backend và IoT Simulator (development)
 
-Framework, lệnh cài đặt và lệnh chạy backend sẽ được bổ sung sau khi nhóm thống
-nhất công nghệ. Xem `backend/README.md` và `database/README.md` để biết quy ước
-phát triển Sprint 1.
+1. Tạo `.env` ở thư mục gốc từ [.env.example](./.env.example), cấu hình PostgreSQL
+   và thay tất cả secret bằng giá trị ngẫu nhiên. Không commit `.env`.
+2. Cài dependency Backend: `cd backend` rồi `npm ci`.
+3. Khởi tạo schema/migration: `npm run db:migrate`; chạy API: `npm start`.
+4. Khởi chạy Mosquitto: `docker compose -f iot-simulator/docker-compose.dev.yml up -d`.
+5. Tạo `iot-simulator/.env` từ `.env.example`, đặt cùng `IOT_DEVICE_SECRET` như
+   Backend, rồi từ `iot-simulator/` chạy `python simulator.py --machine VM001`.
 
-Không commit file `.env` hoặc thông tin xác thực thật. Tạo cấu hình cục bộ từ
-`.env.example` và điền giá trị phù hợp với môi trường của bạn.
+Backend dùng `MQTT_ENABLED=true` để kết nối broker, tạo lệnh DISPENSE bền vững
+sau khi payment callback xác nhận thành công, rồi chờ kết quả simulator. Xem
+[iot-simulator/README.md](./iot-simulator/README.md) để biết topic, payload,
+vận hành và giới hạn kiểm thử tích hợp hiện tại.
 
-## Phạm vi Sprint 1
+## Kiểm thử
 
-- Backend khởi động và kết nối PostgreSQL.
-- Migration database dựa trên ERD đã chốt.
-- API đọc sản phẩm và tồn kho.
-- Đăng nhập và kiểm tra quyền cơ bản.
-- Khung IoT Simulator có thể cung cấp dữ liệu trạng thái mẫu.
-
-Đặt hàng, thanh toán, trừ tồn khi mua, điều khiển thiết bị thật và giao diện người
-dùng nằm ngoài phạm vi Sprint 1.
+- Backend + PostgreSQL: `cd backend` rồi `npm test`.
+- IoT Simulator: `cd iot-simulator` rồi `python -m unittest discover -s tests -v`.
+- Kiểm tra migration: `cd backend` rồi `npm run db:migrate:status`.

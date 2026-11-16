@@ -17,6 +17,7 @@ from collections import OrderedDict, deque
 from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
 
 from .config import SimConfig
+from .auth import sign_payload, verify_payload
 from .faults import FaultInjector
 from .protocol import (
     CommandValidationError, DispenseCommand, DispenseItem, ErrorCode, ItemStatus, Topics,
@@ -93,11 +94,13 @@ class VirtualMachine:
         self._door_alerted = False
 
         self._threads: List[threading.Thread] = []
+        self._started = False
 
     # ─── Vòng đời ────────────────────────────────────────────────────────────
 
     def start(self) -> None:
         self._load_state()
+        self._started = True
         self._transport.on_connected = self._on_connected
         self._transport.on_disconnected = self._on_disconnected
         self._transport.subscribe(self.topics.dispense_command, self.handle_dispense_message, qos=1)
@@ -111,6 +114,9 @@ class VirtualMachine:
         self._stop.set()
         self._publish(self.topics.status, self._status_payload("OFFLINE"), qos=1, retain=True, buffer="none")
         self._transport.disconnect()
+        self._started = False
+        if self._http_sender and hasattr(self._http_sender, "close"):
+            self._http_sender.close()
         for thread in self._threads:
             thread.join(timeout=3)
         log.info("Máy %s đã dừng.", self.machine_code)
@@ -131,6 +137,7 @@ class VirtualMachine:
         return {
             "machineCode": self.machine_code,
             "status": status,
+            "connectionStatus": status,
             "machineState": BACKEND_STATE[OFFLINE] if status == "OFFLINE" else self.backend_state(),
             "timestamp": utc_now_iso(),
         }
@@ -182,6 +189,7 @@ class VirtualMachine:
     def _publish(self, topic: str, payload: Dict[str, Any], qos: int, retain: bool = False,
                  buffer: str = "critical") -> bool:
         try:
+            payload = sign_payload(payload, self.cfg.iot_secret)
             sent = self._transport.publish(topic, payload, qos, retain)
         except Exception:  # noqa: BLE001
             log.exception("Lỗi publish tới %s", topic)
@@ -189,7 +197,11 @@ class VirtualMachine:
         if not sent and buffer != "none":
             with self._lock:
                 if buffer == "telemetry":
-                    self._telemetry_buffer.append((topic, dict(payload, buffered=True), qos, retain))
+                    buffered_payload = sign_payload(
+                        dict(payload, buffered=True),
+                        self.cfg.iot_secret,
+                    )
+                    self._telemetry_buffer.append((topic, buffered_payload, qos, retain))
                 else:
                     self._outbox.append((topic, payload, qos, retain))
         return sent
@@ -282,9 +294,11 @@ class VirtualMachine:
 
     def build_telemetry(self, sample: Dict[str, Any]) -> Dict[str, Any]:
         # Tương thích bản tin Sprint 1; `internalState` và `lockedSlots` là trường bổ sung.
+        connected = self._transport.is_connected()
         return {
             "machineCode": self.machine_code,
-            "machineState": self.backend_state(),
+            "machineState": self.backend_state() if connected else "OFFLINE",
+            "connectionStatus": "ONLINE" if connected else "OFFLINE",
             "internalState": self.internal_state(),
             "temperature": sample["temperature"],
             "humidity": sample["humidity"],
@@ -313,6 +327,14 @@ class VirtualMachine:
     def handle_dispense_message(self, topic: str, raw: bytes) -> None:
         """Chạy trên luồng mạng: chỉ validate + chống trùng + xếp hàng, tuyệt đối không chặn."""
         try:
+            data = decode_json_object(raw)
+            if not verify_payload(data, self.cfg.iot_secret):
+                raise CommandValidationError(
+                    "UNAUTHENTICATED_MESSAGE",
+                    "Lệnh MQTT thiếu chữ ký hoặc có chữ ký không hợp lệ.",
+                    data.get("commandId") if isinstance(data.get("commandId"), str) else None,
+                    data.get("orderId") if isinstance(data.get("orderId"), str) else None,
+                )
             cmd = parse_dispense_command(raw, self.machine_code)
         except CommandValidationError as err:
             self._reject_invalid(err)
@@ -528,7 +550,20 @@ class VirtualMachine:
         request_id: Optional[str] = None
         try:
             data = decode_json_object(raw)
+            if not verify_payload(data, self.cfg.iot_secret):
+                raise CommandValidationError(
+                    "UNAUTHENTICATED_MESSAGE",
+                    "Lệnh điều khiển MQTT thiếu chữ ký hoặc có chữ ký không hợp lệ.",
+                )
+            target_code = data.get("machineCode")
+            if target_code is not None and str(target_code).strip().upper() != self.machine_code:
+                raise CommandValidationError(
+                    "MACHINE_MISMATCH",
+                    f"Lệnh điều khiển dành cho máy {target_code}, không phải {self.machine_code}.",
+                )
             request_id = data.get("requestId") if isinstance(data.get("requestId"), str) else None
+            if not request_id:
+                raise CommandValidationError("INVALID_COMMAND", "Thiếu requestId.")
             action = str(data.get("action", "")).upper()
             if action != "CLEAR_FAULT":
                 raise CommandValidationError("UNSUPPORTED_ACTION", f"Chưa hỗ trợ action {action!r}.")

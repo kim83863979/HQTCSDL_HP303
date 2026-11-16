@@ -45,6 +45,11 @@ router.patch(
   ...canManageSlots,
   machineController.updateSlotStatus,
 );
+router.post(
+  "/:id/control",
+  ...canManageSlots,
+  machineController.sendControlCommand,
+);
 
 // ─── Chi tiết máy và danh sách khe ────────────────────────────────────────────
 router.get("/:id", ...canViewMachines, machineController.getMachineById);

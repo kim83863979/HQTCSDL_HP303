@@ -16,6 +16,7 @@ import threading
 from pathlib import Path
 
 from freshvend_sim.config import SimConfig, load_env_file
+from freshvend_sim.auth import sign_payload
 from freshvend_sim.console import run_console
 from freshvend_sim.faults import FaultInjector
 from freshvend_sim.http_telemetry import HttpTelemetrySender
@@ -83,6 +84,7 @@ def main() -> int:
 
     topics = Topics.for_machine(cfg.machine_code, cfg.topic_prefix)
     will = make_will(topics, cfg.machine_code)
+    will = (will[0], sign_payload(will[1], cfg.iot_secret), will[2], will[3])
     try:
         transport = PahoTransport(cfg.broker_host, cfg.broker_port, f"freshvend-sim-{cfg.machine_code}",
                                   cfg.username, cfg.password, cfg.use_tls, will)
@@ -90,7 +92,9 @@ def main() -> int:
         print(exc, file=sys.stderr)
         return 2
 
-    http_sender = HttpTelemetrySender(cfg.backend_url, cfg.iot_secret) \
+    http_sender = HttpTelemetrySender(
+        cfg.backend_url, cfg.iot_secret, state_dir=cfg.state_dir, machine_code=cfg.machine_code,
+    ) \
         if cfg.telemetry_transport in {"http", "both"} else None
     machine = VirtualMachine(cfg, transport, faults, StateStore(cfg.state_dir, cfg.machine_code, cfg.persist),
                              http_sender=http_sender)
