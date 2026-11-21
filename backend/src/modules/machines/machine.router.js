@@ -51,6 +51,18 @@ router.post(
   ...canManageSlots,
   machineController.sendControlCommand,
 );
+router.post(
+  "/:id/demo/start",
+  authenticateToken,
+  requireRoles("ADMIN"),
+  machineController.setDemoMachineRunning(true),
+);
+router.post(
+  "/:id/demo/stop",
+  authenticateToken,
+  requireRoles("ADMIN"),
+  machineController.setDemoMachineRunning(false),
+);
 
 // ─── Chi tiết máy và danh sách khe ────────────────────────────────────────────
 router.get("/:id", ...canViewMachines, machineController.getMachineById);

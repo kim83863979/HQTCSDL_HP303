@@ -1789,6 +1789,35 @@ button:disabled {
   color: #57645a;
   font-size: 13px;
 }
+.machine-demo-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid #dcebdd;
+  border-radius: 9px;
+  background: #f5faf5;
+}
+.machine-demo-control strong {
+  color: #32553d;
+  font-size: 13px;
+}
+.machine-demo-control p {
+  margin: 5px 0 0;
+  color: #718477;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.machine-demo-control .button {
+  flex: none;
+}
+@media (max-width: 540px) {
+  .machine-demo-control {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
 .machine-modal-section {
   margin-top: 5px;
 }

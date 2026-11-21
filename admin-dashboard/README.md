@@ -17,6 +17,7 @@ Mặc định Vite chạy tại `http://localhost:5174` và proxy `/api` đến 
 - Đăng nhập chung qua `POST /api/auth/login`, xác thực phiên bằng `GET /api/auth/me`; token được lưu cục bộ và vai trò `ADMIN`/`OPERATOR` quyết định khu vực được mở.
 - Admin vào dashboard quản trị; Operator được mount từ `operator.js` trong cùng phiên đăng nhập, dùng chung token và đăng xuất. Không có lựa chọn role thủ công tại form đăng nhập.
 - Tổng quan hệ thống, danh sách/trạng thái máy và chi tiết máy/khe hàng.
+- Trong môi trường phát triển, Admin mở **Máy bán hàng → chọn máy → Bật máy demo** để backend gửi nhịp kết nối mô phỏng và cho phép thử đặt hàng/thanh toán. Máy giữ trạng thái bật cho đến khi Admin bấm **Tắt máy demo**; nếu backend khởi động lại, lựa chọn này được khôi phục từ tệp cục bộ. Chế độ này không mô phỏng cơ cấu nhả hàng; muốn thử nhả hàng thực tế cần IoT Simulator và MQTT broker.
 - Tra cứu tồn kho theo máy; gán sản phẩm vào khe trống; nhập hàng theo khe; xem chi tiết và phân trang lịch sử nhập kho; xuất CSV.
 - Operator xem trạng thái máy, tồn kho, cảnh báo theo máy và lịch sử nhập; có thể nhập hàng hoặc phân bổ sản phẩm vào khe trống theo quyền backend.
 - Quản lý catalog: tạo/cập nhật sản phẩm và danh mục, đổi giá, tìm kiếm/lọc theo danh mục/trạng thái, ngừng bán/kích hoạt sản phẩm và xóa danh mục chưa được tham chiếu.

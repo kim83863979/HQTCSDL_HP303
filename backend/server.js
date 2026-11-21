@@ -10,6 +10,7 @@ const { checkConnection } = require("./src/config/db");
 const { pool } = require("./src/config/db");
 const { MqttAdapter } = require("./src/modules/iot/mqtt.adapter");
 const dispenseService = require("./src/modules/iot/dispense.service");
+const machineDemo = require("./src/modules/machines/machine.demo");
 
 const PORT = process.env.APP_PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || "development";
@@ -67,6 +68,11 @@ async function start() {
   }
 
   // ── 2. Khởi động HTTP server ─────────────────────────────────────────────────
+  try {
+    await machineDemo.restore();
+  } catch (error) {
+    console.error('[MACHINE_DEMO] Could not restore saved demo state:', error);
+  }
   const server = app.listen(PORT, () => {
     console.log("\n" + "=".repeat(55));
     console.log(`   Server đang chạy tại http://localhost:${PORT}`);

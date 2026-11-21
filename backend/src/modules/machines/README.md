@@ -20,6 +20,8 @@
 | `GET` | `/api/machines/orders/:orderId/dispense-plan` | JWT + `VIEW_MACHINE` | Tạo kế hoạch nhả hàng từ đơn. |
 | `POST` | `/api/machines/:id/slots` | JWT + role `ADMIN` hoặc `OPERATOR` | Tạo khe máy. |
 | `PATCH` | `/api/machines/:id/slots/:slotId/status` | JWT + role `ADMIN` hoặc `OPERATOR` | Cập nhật trạng thái/sức chứa khe. |
+| `POST` | `/api/machines/:id/demo/start` | JWT + role `ADMIN`; chỉ môi trường phát triển | Bật nhịp kết nối mô phỏng để thử đặt hàng/thanh toán. |
+| `POST` | `/api/machines/:id/demo/stop` | JWT + role `ADMIN`; chỉ môi trường phát triển | Tắt nhịp kết nối mô phỏng. |
 
 `resolve-order-slots` là endpoint nội bộ phục vụ tích hợp máy và đơn hàng; chỉ
 cho phép người dùng có permission `VIEW_MACHINE`.

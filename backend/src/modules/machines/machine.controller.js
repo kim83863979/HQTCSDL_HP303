@@ -45,6 +45,19 @@ const getMachineById = async (req, res) => {
   }
 };
 
+const setDemoMachineRunning = (running) => async (req, res) => {
+  try {
+    const machine = await machineService.setDemoMachineRunning(req.params.id, running);
+    return res.status(200).json({
+      success: true,
+      message: running ? 'Đã bật máy mô phỏng' : 'Đã tắt máy mô phỏng',
+      data: machine,
+    });
+  } catch (err) {
+    return handleControllerError(res, err, 'Lỗi máy chủ khi điều khiển máy mô phỏng');
+  }
+};
+
 const getMachineSlots = async (req, res) => {
   try {
     const includeInventory = req.query.includeInventory === 'true';
@@ -131,6 +144,7 @@ const sendControlCommand = async (req, res) => {
 module.exports = {
   getAllMachines,
   getMachineById,
+  setDemoMachineRunning,
   getMachineSlots,
   checkConsistency,
   createSlot,

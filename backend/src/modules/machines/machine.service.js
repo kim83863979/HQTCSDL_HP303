@@ -1,5 +1,6 @@
 // src/modules/machines/machine.service.js
 const Machine = require('./machine.model');
+const machineDemo = require('./machine.demo');
 const { DEFAULT_SLOT_CAPACITY } = require('../../config/slot-config');
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -87,8 +88,32 @@ const getMachineById = async (id) => {
     ...evaluatedMachine,
     isReadyForOrder: readiness.isReadyForOrder,
     unreadyReasons:  readiness.unreadyReasons,
+    demoControlAvailable: process.env.NODE_ENV !== 'production',
+    demoActive: machineDemo.isActive(machineId),
     slots,
   };
+};
+
+const setDemoMachineRunning = async (id, running) => {
+  if (process.env.NODE_ENV === 'production') {
+    throw new ServiceError(403, 'MACHINE_DEMO_DISABLED', 'Chế độ máy mô phỏng chỉ dùng trong môi trường phát triển.');
+  }
+  const machineId = validateUuid(id, 'MACHINE_ID');
+  const machine = await Machine.findById(machineId);
+  if (!machine) throw new ServiceError(404, 'MACHINE_NOT_FOUND', `Không tìm thấy máy ${machineId}.`);
+  if (running) {
+    if (machine.lifecycleStatus !== 'ACTIVE') {
+      throw new ServiceError(409, 'MACHINE_INACTIVE', 'Máy chưa được kích hoạt trong hệ thống.');
+    }
+    const current = evaluateConnectivity(machine);
+    if (current.isOnline && !machineDemo.isActive(machineId)) {
+      throw new ServiceError(409, 'MACHINE_ALREADY_ONLINE', 'Máy đã trực tuyến qua kết nối thiết bị.');
+    }
+    await machineDemo.start(machine);
+  } else if (!await machineDemo.stop(machineId)) {
+    throw new ServiceError(409, 'MACHINE_DEMO_NOT_RUNNING', 'Máy này không chạy ở chế độ mô phỏng.');
+  }
+  return getMachineById(machineId);
 };
 
 const getMachineSlots = async (id, { includeInventory = false } = {}) => {
@@ -690,6 +715,7 @@ module.exports = {
   ServiceError,
   getAllMachines,
   getMachineById,
+  setDemoMachineRunning,
   getMachineSlots,
   checkMachineSlotInventoryConsistency,
   createMachineSlot,

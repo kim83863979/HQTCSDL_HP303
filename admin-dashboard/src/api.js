@@ -75,6 +75,10 @@ export const authApi = {
 export const dashboardApi = {
   machines: (token) => apiRequest('/machines', { token }),
   machine: (id, token) => apiRequest(`/machines/${encodeURIComponent(id)}`, { token }),
+  setDemoMachineRunning: (id, running, token) => apiRequest(
+    `/machines/${encodeURIComponent(id)}/demo/${running ? 'start' : 'stop'}`,
+    { method: 'POST', token },
+  ),
   slots: (id, token) => apiRequest(`/machines/${encodeURIComponent(id)}/slots?includeInventory=true`, { token }),
   inventory: (id, token) => apiRequest(`/inventory/machines/${encodeURIComponent(id)}`, { token }),
   activeProducts: async () => {

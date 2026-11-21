@@ -507,6 +507,8 @@ function App() {
   const [errors, setErrors] = useState({});
   const [notice, setNotice] = useState("");
   const [machineDetail, setMachineDetail] = useState(null);
+  const [machineDemoBusy, setMachineDemoBusy] = useState(false);
+  const [machineDemoError, setMachineDemoError] = useState("");
   const [roleEdit, setRoleEdit] = useState(null);
   const [roleBusy, setRoleBusy] = useState(false);
 
@@ -655,6 +657,7 @@ function App() {
   }, [data.alerts, data.machines]);
 
   async function openMachine(machine) {
+    setMachineDemoError("");
     setMachineDetail({ machine, loading: true, error: "" });
     try {
       const [machineResponse, slotsResponse] = await Promise.all([
@@ -673,6 +676,28 @@ function App() {
         return;
       }
       setMachineDetail({ machine, loading: false, error: error.message });
+    }
+  }
+
+  async function toggleMachineDemo() {
+    if (!machineDetail || !session || machineDemoBusy) return;
+    const machine = machineDetail.machine;
+    const running = !machine.demoActive;
+    setMachineDemoBusy(true);
+    setMachineDemoError("");
+    try {
+      await dashboardApi.setDemoMachineRunning(machine.id, running, session.token);
+      await openMachine(machine);
+      setRefreshKey((value) => value + 1);
+      setNotice(running ? "Đã bật máy mô phỏng." : "Đã tắt máy mô phỏng.");
+    } catch (error) {
+      if (error.status === 401) {
+        handleSessionExpired();
+        return;
+      }
+      setMachineDemoError(error.message);
+    } finally {
+      setMachineDemoBusy(false);
     }
   }
 
@@ -876,6 +901,9 @@ function App() {
       {machineDetail && (
         <MachineModal
           detail={machineDetail}
+          demoBusy={machineDemoBusy}
+          demoError={machineDemoError}
+          onDemoToggle={toggleMachineDemo}
           onClose={() => setMachineDetail(null)}
         />
       )}
@@ -1638,7 +1666,7 @@ function MachineCard({ machine, onClick }) {
   );
 }
 
-function MachineModal({ detail, onClose }) {
+function MachineModal({ detail, demoBusy, demoError, onDemoToggle, onClose }) {
   const machine = detail.machine || {};
   const slots = machine.slots || [];
   return (
@@ -1723,6 +1751,28 @@ function MachineModal({ detail, onClose }) {
                 </strong>
               </div>
             </div>
+            {machine.demoControlAvailable && (
+              <div className="machine-demo-control">
+                <div>
+                  <strong>Máy mô phỏng cho bản demo</strong>
+                  <p>
+                    {machine.demoActive
+                      ? "Backend đang gửi tín hiệu định kỳ để máy giữ trạng thái trực tuyến."
+                      : "Bật tín hiệu mô phỏng để thử đặt hàng và thanh toán. Nhả hàng cần IoT Simulator và MQTT."}
+                  </p>
+                </div>
+                <button
+                  className={`button ${machine.demoActive ? "button-quiet" : "button-primary"}`}
+                  disabled={demoBusy || (machine.connectionStatus === "ONLINE" && !machine.demoActive)}
+                  onClick={onDemoToggle}
+                >
+                  {demoBusy
+                    ? "Đang cập nhật..."
+                    : machine.demoActive ? "Tắt máy demo" : "Bật máy demo"}
+                </button>
+              </div>
+            )}
+            {demoError && <div className="inline-alert" role="alert">{demoError}</div>}
             <div className="machine-modal-section">
               <div className="panel-heading">
                 <div>

@@ -26,3 +26,5 @@ Thumbs.db
 Desktop.ini
 
 PROJECT_MEMORY.md
+backend/.demo-machines.json
+backend/.demo-machines.json.tmp
