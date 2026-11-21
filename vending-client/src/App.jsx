@@ -78,6 +78,12 @@ function categoryEmoji(name = "") {
 
 function productArt(name = "", category = "") {
   const value = (name + " " + category).toLowerCase();
+  if (value.includes("nước ép") || value.includes("juice")) return "🧃";
+  if (value.includes("dưa hấu")) return "🍉";
+  if (value.includes("mix")) return "🍱";
+  if (value.includes("pear") || value.includes("lê")) return "🍐";
+  if (value.includes("guava") || value.includes("ổi")) return "🍈";
+  if (value.includes("mandarin") || value.includes("quýt")) return "🍊";
   if (value.includes("apple") || value.includes("táo")) return "🍎";
   if (value.includes("orange") || value.includes("cam")) return "🍊";
   if (value.includes("banana") || value.includes("chuối")) return "🍌";
@@ -89,6 +95,20 @@ function productArt(name = "", category = "") {
 
 function productImage(name = "") {
   const value = name.toLowerCase();
+  if (value.includes("nước ép táo")) return "/products/apple-juice.png";
+  if (value.includes("nước ép chanh dây")) return "/products/passionfruit-juice.png";
+  if (value.includes("nước ép cam")) return "/products/orange-juice-carton.png";
+  if (value.includes("nước ép xoài")) return "/products/mango-juice.png";
+  if (value.includes("nước ép dưa hấu")) return "/products/watermelon-juice.png";
+  if (value.includes("dưa hấu")) return "/products/watermelon-ready.png";
+  if (value.includes("mix 5")) return "/products/mix-five.png";
+  if (value.includes("mix 3")) return "/products/mix-three.png";
+  if (value.includes("pear") || value.includes("lê"))
+    return "/products/pear.png";
+  if (value.includes("guava") || value.includes("ổi"))
+    return "/products/guava.png";
+  if (value.includes("mandarin") || value.includes("quýt"))
+    return "/products/mandarin.png";
   if (value.includes("apple") || value.includes("táo"))
     return "/products/apple.png";
   if (value.includes("banana") || value.includes("chuối"))
