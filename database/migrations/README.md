@@ -26,6 +26,10 @@ Hai migration hiện có:
 2. `20261107020000_fix_order_source_triggers.sql` — sửa trigger khi đổi trạng
    thái slot/sản phẩm và xử lý payment đang chờ khi order bị hủy hoặc thất bại.
 
+Các migration bổ sung sau đó hỗ trợ API quản trị, dispense MQTT và Guest checkout.
+`20261120100000_add_guest_order_access.sql` thêm hash capability token cho đơn
+Guest; token rõ chỉ trả về cho Client lúc tạo đơn, không lưu trực tiếp trong DB.
+
 Với database đã chạy thủ công migration đầu, runner kiểm tra đầy đủ schema rồi
 ghi nhận migration đó trước khi áp dụng migration thứ hai. Nếu schema chỉ được
 áp dụng một phần, runner dừng để tránh tự ý làm sai dữ liệu. Không sửa migration

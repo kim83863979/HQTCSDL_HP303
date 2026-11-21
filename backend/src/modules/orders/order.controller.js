@@ -18,11 +18,18 @@ const createOrder = handle(async (req) => ({
   data: await orderService.createOrder(req.body),
 }));
 
-const getOrder = handle((req) => orderService.getOrder(req.params.orderId));
+const getOrder = handle((req) => orderService.getOrder(
+  req.params.orderId,
+  req.get('x-guest-order-token'),
+));
 
 const createPaymentAttempt = handle(async (req) => ({
   _created: true,
-  data: await orderService.createPaymentAttempt(req.params.orderId, req.body?.paymentMethod),
+  data: await orderService.createPaymentAttempt(
+    req.params.orderId,
+    req.body?.paymentMethod,
+    req.get('x-guest-order-token'),
+  ),
 }));
 
 const processPaymentCallback = handle((req) => (

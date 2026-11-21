@@ -1,5 +1,6 @@
 // src/modules/machines/machine.service.js
 const Machine = require('./machine.model');
+const { DEFAULT_SLOT_CAPACITY } = require('../../config/slot-config');
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SLOT_CODE_REGEX = /^[A-Z][0-9]{1,3}$/; // VD: A1, A01, B02
@@ -200,7 +201,7 @@ const createMachineSlot = async (machineIdParam, payload = {}) => {
     throw new ServiceError(400, 'INVALID_PAYLOAD_FORMAT', 'Payload phải là JSON object.');
   }
 
-  const { slotCode, capacity = 20, status = 'ACTIVE' } = payload;
+  const { slotCode, capacity = DEFAULT_SLOT_CAPACITY, status = 'ACTIVE' } = payload;
   if (!slotCode || typeof slotCode !== 'string' || !SLOT_CODE_REGEX.test(slotCode.trim().toUpperCase())) {
     throw new ServiceError(400, 'INVALID_SLOT_CODE', 'Mã khe (slotCode) không hợp lệ (VD hợp lệ: A01, A02, B1).');
   }

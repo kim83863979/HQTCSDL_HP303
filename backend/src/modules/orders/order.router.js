@@ -16,9 +16,9 @@ const verifyOrderMaintenance = verifySharedSecret({
   errorCode: 'UNAUTHORIZED_ORDER_MAINTENANCE',
 });
 
-router.post('/', authenticateToken, orderController.createOrder);
-router.get('/:orderId', authenticateToken, orderController.getOrder);
-router.post('/:orderId/payments', authenticateToken, orderController.createPaymentAttempt);
+router.post('/', orderController.createOrder);
+router.get('/:orderId', orderController.getOrder);
+router.post('/:orderId/payments', orderController.createPaymentAttempt);
 router.post('/:orderId/cancel', authenticateToken, orderController.cancelOrder);
 router.post('/:orderId/dispense-result', verifyIotDevice, orderController.recordDispenseResult);
 router.post('/expire', verifyOrderMaintenance, orderController.expireOrders);

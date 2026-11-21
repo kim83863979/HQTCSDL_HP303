@@ -176,14 +176,13 @@ ON CONFLICT (machine_id) DO UPDATE
 SET last_seen_at = CURRENT_TIMESTAMP, connection_status = 'ONLINE';
 
 -- ------------------------------------------------------------------------------
--- 10. SEED MACHINE SLOTS (A01, A02, A03, A04)
+-- 10. SEED 50 LOGICAL MACHINE SLOTS
 -- ------------------------------------------------------------------------------
 INSERT INTO machine_slots (slot_id, machine_id, slot_code, capacity, status)
-VALUES 
-    (gen_random_uuid(), (SELECT machine_id FROM machines WHERE machine_code = 'VM001'), 'A01', 20, 'ACTIVE'),
-    (gen_random_uuid(), (SELECT machine_id FROM machines WHERE machine_code = 'VM001'), 'A02', 20, 'ACTIVE'),
-    (gen_random_uuid(), (SELECT machine_id FROM machines WHERE machine_code = 'VM001'), 'A03', 20, 'ACTIVE'),
-    (gen_random_uuid(), (SELECT machine_id FROM machines WHERE machine_code = 'VM001'), 'A04', 15, 'ACTIVE')
+SELECT gen_random_uuid(), m.machine_id, 'A' || LPAD(slot_number::text, 2, '0'), 20, 'ACTIVE'
+FROM machines m
+CROSS JOIN generate_series(1, 50) AS slot_number
+WHERE m.machine_code = 'VM001'
 ON CONFLICT (machine_id, slot_code) DO NOTHING;
 
 -- ------------------------------------------------------------------------------

@@ -33,8 +33,9 @@ before(async () => {
 after(() => pool.end());
 
 describe('Machines API', () => {
-  it('rejects machine queries without authentication', async () => {
-    await request(app).get('/api/machines').expect(401);
+  it('allows the public machine list for Client and protects machine details', async () => {
+    await request(app).get('/api/machines').expect(200);
+    await request(app).get(`/api/machines/${MACHINE_ID}`).expect(401);
   });
 
   it('lists machines', { skip: !hasDatabase }, async () => {

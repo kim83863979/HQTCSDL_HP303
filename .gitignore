@@ -24,3 +24,5 @@ venv/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+PROJECT_MEMORY.md

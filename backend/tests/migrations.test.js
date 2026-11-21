@@ -14,6 +14,7 @@ describe('Database migrations', () => {
     assert.ok(names.includes('20261107010000_order_payment_inventory.sql'));
     assert.ok(names.includes('20261107020000_fix_order_source_triggers.sql'));
     assert.ok(names.includes('20261115210000_dispense_mqtt_workflow.sql'));
+    assert.ok(names.includes('20261120100000_add_guest_order_access.sql'));
     assert.ok(names.every((name) => !name.includes('rollback') && !name.startsWith('dump-')));
     assert.ok(migrations.every((migration) => /^[a-f0-9]{64}$/.test(migration.checksum)));
   });

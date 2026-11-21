@@ -9,7 +9,8 @@ from typing import List, Optional
 
 from .protocol import DEFAULT_TOPIC_PREFIX, normalize_column, normalize_machine_code
 
-DEFAULT_SLOTS = ("A01", "A02", "A03", "A04")  # khớp seed_data.sql của VM001
+DEFAULT_SLOT_COUNT = 50
+DEFAULT_SLOTS = tuple(f"A{number:02d}" for number in range(1, DEFAULT_SLOT_COUNT + 1))
 
 
 def load_env_file(path: Path) -> None:

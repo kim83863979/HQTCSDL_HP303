@@ -22,7 +22,7 @@ async function withTransaction(work) {
 async function findOrder(client, orderId, { lock = false } = {}) {
   const result = await client.query(
     `SELECT order_id, machine_id, order_status, total_amount, refund_due_amount,
-            created_at, expires_at
+            guest_access_token_hash, created_at, expires_at
      FROM orders
      WHERE order_id = $1
      ${lock ? 'FOR UPDATE' : ''}`,

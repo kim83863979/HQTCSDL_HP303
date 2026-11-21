@@ -38,18 +38,59 @@ trong môi trường local/test.
 
 ## Đơn hàng và thanh toán
 
-Tạo đơn bằng `POST /api/orders` với `machineId` và `items`, mỗi item gồm
+Khách có thể đặt hàng Guest, không cần JWT. Tạo đơn bằng `POST /api/orders`
+với `machineId` và `items`, mỗi item gồm
 `productId`, `slotId`, `quantity`. Backend khóa và kiểm tra tồn kho, sản phẩm,
 khe và máy trước khi tạo đơn PENDING; giá được lấy từ database và hàng được
-giữ trong cùng transaction. Giao dịch tạo/thanh toán/giữ hàng được tích hợp
-trong `orders/order.router.js`.
+giữ trong cùng transaction. Response tạo đơn trả `guestAccessToken` ngẫu nhiên;
+Client phải giữ bí mật và gửi trong header `x-guest-order-token` khi đọc đơn,
+tạo payment attempt hoặc đọc payment. Database chỉ lưu hash token. Thiếu/sai
+token không cho phép truy cập đơn hoặc thanh toán.
+
+Giao dịch tạo/thanh toán/giữ hàng được tích hợp trong
+`orders/order.router.js`. Các route Admin, máy, thiết bị IoT và tác vụ bảo trì
+vẫn giữ JWT/permission hoặc shared secret tương ứng.
 
 Thanh toán có thể bắt đầu qua `POST /api/orders/:orderId/payments` hoặc alias
-`POST /api/payments`. Callback tích hợp dùng
-`POST /api/orders/payments/:paymentId/callback` với body `{ "status":
-"SUCCESS" }`; alias `POST /api/payments/:paymentId/result` nhận
-`{ "paymentStatus": "SUCCESS" }`. Cả hai callback đều yêu cầu
-`x-payment-key` khớp `PAYMENT_WEBHOOK_SECRET`.
+`POST /api/payments`; cả hai route Guest đều yêu cầu `x-guest-order-token`.
+Payment webhook thật dùng `POST /api/orders/payments/:paymentId/callback` với
+body `{ "status": "SUCCESS" }`; alias `POST /api/payments/:paymentId/result`
+nhận `{ "paymentStatus": "SUCCESS" }`. Cả hai callback chỉ xác thực bằng
+`x-payment-key` khớp `PAYMENT_WEBHOOK_SECRET`, không dùng JWT Guest.
+
+Payment mock của Vending Client dùng
+`POST /api/payments/:paymentId/demo-result` với
+`{ "paymentStatus": "SUCCESS", "transactionReference": "DEMO-001" }` và
+`x-guest-order-token`. Đổi `paymentStatus` thành `FAILED` để mô phỏng thất bại;
+reference có thể bỏ qua, backend sẽ tạo reference Demo. PaymentId phải thuộc
+đơn gắn với Guest token. Route này chỉ bật ngoài production; production luôn
+trả 404. Không đặt webhook secret vào Client.
+
+Postman: tạo đơn `POST /api/orders` với machineId và items; lưu
+`data.id` thành `orderId`, `data.guestAccessToken` thành `guestToken`. Tạo
+payment `POST /api/orders/{{orderId}}/payments` với header
+`x-guest-order-token: {{guestToken}}` và body `{ "paymentMethod": "QR" }`;
+lưu `data.id` thành `paymentId`. Gọi một trong các request sau với header
+`x-guest-order-token: {{guestToken}}`:
+
+- SUCCESS: `POST /api/payments/{{paymentId}}/demo-result`, body
+  `{ "paymentStatus": "SUCCESS", "transactionReference": "DEMO-POSTMAN-001" }`.
+  Kỳ vọng 200, payment SUCCESS, `paidAt` có giá trị, order PAID và có dispense
+  command.
+- FAILED: với một payment mới, dùng cùng URL và body
+  `{ "paymentStatus": "FAILED", "transactionReference": "DEMO-POSTMAN-002" }`.
+  Kỳ vọng 200, payment FAILED, order PENDING, reservation được giải phóng và
+  có thể tạo payment attempt mới.
+
+Sau đó GET `/api/admin/payments?status=SUCCESS` hoặc `?status=FAILED` bằng
+JWT Admin có `VIEW_REPORT` để xác nhận trạng thái trong Admin. GET
+`/api/payments/{{paymentId}}` với guest token cũng trả trạng thái mới nhất.
+Gọi lại cùng kết quả và reference trả `changed: false`; thử đổi kết quả đã kết
+thúc trả 409; thiếu/sai Guest token không thể cập nhật payment. Webhook thực tế
+tiếp tục dùng `POST /api/orders/payments/{{paymentId}}/callback`, body
+`{ "status": "SUCCESS", "transactionReference": "PROVIDER-001" }` và
+header `x-payment-key`; alias `/api/payments/{{paymentId}}/result` vẫn được bảo
+vệ bằng cùng shared secret.
 
 Payment thất bại, đơn bị hủy/hết hạn hoặc dispense thất bại sẽ giải phóng hàng
 đã giữ; payment thành công sẽ tiêu thụ số lượng giữ đúng một lần. Tác vụ hết

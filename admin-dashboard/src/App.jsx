@@ -20,7 +20,7 @@ const NAV_ITEMS = [
   { id: "accounts", label: "Tài khoản", icon: "users", group: "QUẢN TRỊ" },
   { id: "alerts", label: "Cảnh báo", icon: "bell" },
   { id: "reports", label: "Báo cáo", icon: "chart" },
-  { id: "settings", label: "Cấu hình", icon: "settings" },
+  //{ id: "settings", label: "Cấu hình", icon: "settings" },
 ];
 
 const ICONS = {
@@ -1583,10 +1583,6 @@ function MachinesPage({ machines, error, loading, onOpenMachine, onRefresh }) {
           />
         </div>
       )}
-      <DataScopeNote>
-        Trang này sử dụng danh sách, chi tiết và khe máy từ API hiện có. Backend
-        chưa cung cấp nhật ký nhiệt độ lịch sử hoặc luồng WebSocket.
-      </DataScopeNote>
     </>
   );
 }
@@ -4220,14 +4216,14 @@ function ReportsPage({ token, machines, onSessionExpired, onNotice }) {
             <div>
               <button
                 className="button button-quiet"
-                disabled={page <= 1 || loading}
+                disabled={page <= 1 || listLoading}
                 onClick={() => setPage((value) => value - 1)}
               >
                 Trước
               </button>
               <button
                 className="button button-quiet"
-                disabled={page >= pagination.totalPages || loading}
+                disabled={page >= pagination.totalPages || listLoading}
                 onClick={() => setPage((value) => value + 1)}
               >
                 Tiếp
