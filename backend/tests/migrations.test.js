@@ -3,7 +3,9 @@ const { describe, it } = require('node:test');
 const {
   classifyLegacyMigrationState,
   loadMigrations,
+  migrationChecksums,
   stripOuterTransaction,
+  validateLedger,
 } = require('../scripts/migrate');
 
 describe('Database migrations', () => {
@@ -24,6 +26,61 @@ describe('Database migrations', () => {
       '-- migration\nBEGIN;\nDO $$ BEGIN\n  PERFORM 1;\nEND $$;\nCOMMIT;\n',
     );
     assert.equal(body.trim(), '-- migration\nDO $$ BEGIN\n  PERFORM 1;\nEND $$;');
+  });
+
+  it('accepts either the raw or LF-normalized checksum recorded in the ledger', () => {
+    const version = '20261201000000';
+    const name = `${version}_checksum_probe.sql`;
+    const lfSql = 'BEGIN;\nSELECT 1;\nCOMMIT;\n';
+    const crlfSql = lfSql.replace(/\n/g, '\r\n');
+    const crSql = lfSql.replace(/\n/g, '\r');
+    const lfChecksums = migrationChecksums(lfSql);
+    const crlfChecksums = migrationChecksums(crlfSql);
+    const crChecksums = migrationChecksums(crSql);
+    const migration = { version, name, ...crlfChecksums };
+
+    assert.equal(lfChecksums.checksum, crlfChecksums.checksum);
+    assert.equal(lfChecksums.checksum, crChecksums.checksum);
+    assert.notEqual(lfChecksums.rawChecksum, crlfChecksums.rawChecksum);
+    assert.doesNotThrow(() => validateLedger(
+      new Map([[version, { name, checksum: crlfChecksums.rawChecksum }]]),
+      [migration],
+    ));
+    assert.doesNotThrow(() => validateLedger(
+      new Map([[version, { name, checksum: crChecksums.rawChecksum }]]),
+      [{ version, name, ...crChecksums }],
+    ));
+    assert.doesNotThrow(() => validateLedger(
+      new Map([[version, { name, checksum: lfChecksums.checksum }]]),
+      [migration],
+    ));
+  });
+
+  it('rejects SQL edits that match neither recorded newline representation', () => {
+    const version = '20261201000000';
+    const name = `${version}_checksum_probe.sql`;
+    const appliedSql = 'BEGIN;\nSELECT 1;\nCOMMIT;\n';
+    const editedSql = 'BEGIN;\nSELECT 2;\nCOMMIT;\n';
+    const migration = { version, name, ...migrationChecksums(editedSql) };
+    const ledger = new Map([[
+      version,
+      { name, checksum: migrationChecksums(appliedSql).checksum },
+    ]]);
+
+    assert.throws(() => validateLedger(ledger, [migration]), /differs from its recorded checksum/);
+  });
+
+  it('loads the product image migration with a valid transaction wrapper', () => {
+    const migration = loadMigrations().find(
+      (item) => item.name === '20261122100000_add_product_image_url.sql',
+    );
+
+    assert.ok(migration);
+    assert.doesNotThrow(() => stripOuterTransaction(migration.sql));
+    assert.match(migration.sql.trimStart(), /^BEGIN;/);
+    assert.match(migration.sql.trimEnd(), /COMMIT;$/);
+    assert.match(migration.sql, /ADD COLUMN IF NOT EXISTS image_url text/);
+    assert.doesNotMatch(migration.sql, /\b(?:UPDATE|DELETE)\b/i);
   });
 
   it('distinguishes unapplied, complete, and partially applied legacy schema', () => {

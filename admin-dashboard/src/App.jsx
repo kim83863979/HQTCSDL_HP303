@@ -428,11 +428,6 @@ function Sidebar({ active, setActive, user, onLogout, open, onClose }) {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="support-card">
-            <strong>FreshVend Admin</strong>
-            <p>Trung tâm quản lý vận hành của bạn.</p>
-            <span>Phiên bản 1.0.0</span>
-          </div>
           <div className="sidebar-user">
             <span className="user-avatar">{initials(user.fullname)}</span>
             <span className="user-details">
@@ -686,7 +681,11 @@ function App() {
     setMachineDemoBusy(true);
     setMachineDemoError("");
     try {
-      await dashboardApi.setDemoMachineRunning(machine.id, running, session.token);
+      await dashboardApi.setDemoMachineRunning(
+        machine.id,
+        running,
+        session.token,
+      );
       await openMachine(machine);
       setRefreshKey((value) => value + 1);
       setNotice(running ? "Đã bật máy mô phỏng." : "Đã tắt máy mô phỏng.");
@@ -847,6 +846,14 @@ function App() {
                 setData((current) => ({
                   ...current,
                   users: [...current.users, user],
+                }))
+              }
+              onUserDeleted={(userId) =>
+                setData((current) => ({
+                  ...current,
+                  users: current.users.filter(
+                    (user) => (user.user_id || user.id) !== userId,
+                  ),
                 }))
               }
               onSessionExpired={handleSessionExpired}
@@ -1496,10 +1503,6 @@ function Overview({
             tone={alerts.length ? "orange" : "green"}
           />
         </div>
-        <p className="data-note">
-          <Icon name="info" size={15} /> Báo cáo doanh thu, đơn hàng và thanh
-          toán đã được tích hợp trong mục “Báo cáo”.
-        </p>
       </section>
     </>
   );
@@ -1753,26 +1756,36 @@ function MachineModal({ detail, demoBusy, demoError, onDemoToggle, onClose }) {
             </div>
             {machine.demoControlAvailable && (
               <div className="machine-demo-control">
-                <div>
+                {/* <div>
                   <strong>Máy mô phỏng cho bản demo</strong>
                   <p>
                     {machine.demoActive
                       ? "Backend đang gửi tín hiệu định kỳ để máy giữ trạng thái trực tuyến."
                       : "Bật tín hiệu mô phỏng để thử đặt hàng và thanh toán. Nhả hàng cần IoT Simulator và MQTT."}
                   </p>
-                </div>
+                </div> */}
                 <button
                   className={`button ${machine.demoActive ? "button-quiet" : "button-primary"}`}
-                  disabled={demoBusy || (machine.connectionStatus === "ONLINE" && !machine.demoActive)}
+                  disabled={
+                    demoBusy ||
+                    (machine.connectionStatus === "ONLINE" &&
+                      !machine.demoActive)
+                  }
                   onClick={onDemoToggle}
                 >
                   {demoBusy
                     ? "Đang cập nhật..."
-                    : machine.demoActive ? "Tắt máy demo" : "Bật máy demo"}
+                    : machine.demoActive
+                      ? "Tắt máy demo"
+                      : "Bật máy demo"}
                 </button>
               </div>
             )}
-            {demoError && <div className="inline-alert" role="alert">{demoError}</div>}
+            {demoError && (
+              <div className="inline-alert" role="alert">
+                {demoError}
+              </div>
+            )}
             <div className="machine-modal-section">
               <div className="panel-heading">
                 <div>
@@ -1843,6 +1856,7 @@ function InventoryPage({ machines, error, token, onSessionExpired, onNotice }) {
     totalPages: 1,
   });
   const [historyPage, setHistoryPage] = useState(1);
+  const [inventoryPage, setInventoryPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [requestError, setRequestError] = useState("");
@@ -1913,6 +1927,28 @@ function InventoryPage({ machines, error, token, onSessionExpired, onNotice }) {
       .toLowerCase()
       .includes(search.toLowerCase()),
   );
+  const inventoryPageSize = 25;
+  const inventoryPageCount = Math.max(
+    1,
+    Math.ceil(filtered.length / inventoryPageSize),
+  );
+  const visibleInventory = [...filtered]
+    .sort((left, right) =>
+      String(left.slot_code).localeCompare(String(right.slot_code), undefined, {
+        numeric: true,
+      }),
+    )
+    .slice(
+      (inventoryPage - 1) * inventoryPageSize,
+      inventoryPage * inventoryPageSize,
+    );
+  useEffect(() => {
+    setInventoryPage(1);
+  }, [selectedMachine, search]);
+  useEffect(() => {
+    if (inventoryPage > inventoryPageCount)
+      setInventoryPage(inventoryPageCount);
+  }, [inventoryPage, inventoryPageCount]);
   const assignedSlots = inventory.filter(
     (row) =>
       row.inventory_id &&
@@ -2050,6 +2086,7 @@ function InventoryPage({ machines, error, token, onSessionExpired, onNotice }) {
             onChange={(event) => {
               setSelectedMachine(event.target.value);
               setHistoryPage(1);
+              setInventoryPage(1);
             }}
           >
             <option value="">Chọn máy...</option>
@@ -2198,7 +2235,10 @@ function InventoryPage({ machines, error, token, onSessionExpired, onNotice }) {
               placeholder="Tìm khe hoặc sản phẩm..."
               aria-label="Tìm khe hoặc sản phẩm"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setInventoryPage(1);
+              }}
             />
           </div>
         </div>
@@ -2225,7 +2265,7 @@ function InventoryPage({ machines, error, token, onSessionExpired, onNotice }) {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((row) => (
+                {visibleInventory.map((row) => (
                   <tr key={row.slot_id}>
                     <td>
                       <span className="slot-code">{row.slot_code}</span>
@@ -2258,6 +2298,36 @@ function InventoryPage({ machines, error, token, onSessionExpired, onNotice }) {
             title="Chưa có dữ liệu tồn kho"
             description="Máy chưa có khe hoặc không có dữ liệu phù hợp với tìm kiếm."
           />
+        )}
+        {inventoryPageCount > 1 && !loading && !error && (
+          <div className="pagination">
+            <span>
+              Trang {inventoryPage} / {inventoryPageCount} · {filtered.length}{" "}
+              khe
+            </span>
+            <div>
+              <button
+                className="button button-quiet"
+                disabled={inventoryPage <= 1}
+                onClick={() =>
+                  setInventoryPage((value) => Math.max(1, value - 1))
+                }
+              >
+                Trước
+              </button>
+              <button
+                className="button button-quiet"
+                disabled={inventoryPage >= inventoryPageCount}
+                onClick={() =>
+                  setInventoryPage((value) =>
+                    Math.min(inventoryPageCount, value + 1),
+                  )
+                }
+              >
+                Sau
+              </button>
+            </div>
+          </div>
         )}
       </section>
       <section className="panel table-panel history-panel">
@@ -2410,9 +2480,23 @@ function CatalogPage({
   const [status, setStatus] = useState("ALL");
   const [page, setPage] = useState(0);
   const [productDialog, setProductDialog] = useState(null);
+  const [productImageFile, setProductImageFile] = useState(null);
+  const [removeProductImage, setRemoveProductImage] = useState(false);
+  const [productImagePreview, setProductImagePreview] = useState("");
   const [categoryDialog, setCategoryDialog] = useState(null);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState("");
+  useEffect(() => {
+    if (productImageFile) {
+      const previewUrl = URL.createObjectURL(productImageFile);
+      setProductImagePreview(previewUrl);
+      return () => URL.revokeObjectURL(previewUrl);
+    }
+    setProductImagePreview(
+      removeProductImage ? "" : productDialog?.imageUrl || "",
+    );
+    return undefined;
+  }, [productDialog?.imageUrl, productImageFile, removeProductImage]);
   const pageSize = 10;
   const filtered = products.filter(
     (product) =>
@@ -2455,6 +2539,8 @@ function CatalogPage({
       description: String(form.get("description")).trim() || null,
       status,
     };
+    let productSaved = false;
+    let productId = productDialog.productId;
     try {
       if (productDialog.productId) {
         await dashboardApi.updateProduct(
@@ -2462,17 +2548,44 @@ function CatalogPage({
           payload,
           token,
         );
+        productSaved = true;
       } else {
-        await dashboardApi.createProduct(payload, token);
+        const response = await dashboardApi.createProduct(payload, token);
+        productId = response.data.productId;
+        productSaved = true;
+        setProductDialog((current) =>
+          current ? { ...current, productId } : current,
+        );
+      }
+      if (productImageFile) {
+        const response = await dashboardApi.uploadProductImage(
+          productId,
+          productImageFile,
+          token,
+        );
+        setProductDialog((current) =>
+          current ? { ...current, imageUrl: response.data.imageUrl } : current,
+        );
+      } else if (removeProductImage && productDialog.imageUrl) {
+        await dashboardApi.deleteProductImage(productId, token);
       }
       setProductDialog(null);
+      setProductImageFile(null);
+      setRemoveProductImage(false);
       onNotice(
         productDialog.productId ? "Đã cập nhật sản phẩm." : "Đã tạo sản phẩm.",
       );
       onRefresh();
     } catch (saveError) {
+      if (productSaved) onRefresh();
       if (saveError.status === 401) onSessionExpired();
-      else setFormError(saveError.message);
+      else {
+        setFormError(
+          productSaved
+            ? `Thông tin sản phẩm đã lưu nhưng thao tác ảnh thất bại: ${saveError.message}`
+            : saveError.message,
+        );
+      }
     } finally {
       setBusy(false);
     }
@@ -2544,6 +2657,28 @@ function CatalogPage({
     }
   }
 
+  async function deleteProduct(product) {
+    if (
+      !window.confirm(
+        `Xóa sản phẩm "${product.name}"? Nếu sản phẩm đã được dùng, hệ thống sẽ chuyển sang Ngừng bán và giữ nguyên lịch sử.`,
+      )
+    )
+      return;
+    try {
+      const response = await dashboardApi.deleteProduct(product.id, token);
+      const result = response.data;
+      onNotice(
+        result.deleted
+          ? `Đã xóa sản phẩm "${product.name}".`
+          : `Sản phẩm "${product.name}" đã phát sinh dữ liệu nên được chuyển sang Ngừng bán.`,
+      );
+      onRefresh();
+    } catch (deleteError) {
+      if (deleteError.status === 401) onSessionExpired();
+      else onNotice(deleteError.message);
+    }
+  }
+
   return (
     <>
       <PageTitle
@@ -2577,6 +2712,8 @@ function CatalogPage({
               className="button button-primary"
               onClick={() => {
                 setFormError("");
+                setProductImageFile(null);
+                setRemoveProductImage(false);
                 setProductDialog({
                   productName: "",
                   categoryId: categories[0]?.id || "",
@@ -2717,7 +2854,26 @@ function CatalogPage({
                     <td>
                       <span className="product-cell">
                         <span className="product-thumb">
-                          <Icon name="leaf" size={18} />
+                          {product.imageUrl ? (
+                            <>
+                              <img
+                                src={product.imageUrl}
+                                alt=""
+                                loading="lazy"
+                                onError={(event) => {
+                                  event.currentTarget.hidden = true;
+                                  const fallback =
+                                    event.currentTarget.nextElementSibling;
+                                  if (fallback) fallback.hidden = false;
+                                }}
+                              />
+                              <span hidden>
+                                <Icon name="leaf" size={18} />
+                              </span>
+                            </>
+                          ) : (
+                            <Icon name="leaf" size={18} />
+                          )}
                         </span>
                         <span>
                           <strong>{product.name}</strong>
@@ -2745,6 +2901,8 @@ function CatalogPage({
                           className="text-button"
                           onClick={() => {
                             setFormError("");
+                            setProductImageFile(null);
+                            setRemoveProductImage(false);
                             setProductDialog({
                               ...product,
                               productId: product.id,
@@ -2754,6 +2912,12 @@ function CatalogPage({
                           }}
                         >
                           Sửa
+                        </button>
+                        <button
+                          className="text-button text-danger"
+                          onClick={() => deleteProduct(product)}
+                        >
+                          Xóa
                         </button>
                         <button
                           className="text-button"
@@ -2875,6 +3039,69 @@ function CatalogPage({
                 defaultValue={productDialog.description || ""}
               />
             </label>
+            <div className="product-image-field">
+              <label htmlFor="product-image-input">Ảnh sản phẩm</label>
+              <input
+                id="product-image-input"
+                className="admin-input"
+                type="file"
+                accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                disabled={busy}
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  if (!file) return;
+                  const supportedTypes = [
+                    "image/jpeg",
+                    "image/png",
+                    "image/webp",
+                  ];
+                  if (!supportedTypes.includes(file.type)) {
+                    event.currentTarget.value = "";
+                    setProductImageFile(null);
+                    setFormError("Chỉ chấp nhận ảnh JPG, JPEG, PNG hoặc WEBP.");
+                    return;
+                  }
+                  if (file.size > 5 * 1024 * 1024) {
+                    event.currentTarget.value = "";
+                    setProductImageFile(null);
+                    setFormError("Ảnh không được vượt quá 5 MB.");
+                    return;
+                  }
+                  setFormError("");
+                  setRemoveProductImage(false);
+                  setProductImageFile(file);
+                }}
+              />
+              <small>JPG, JPEG, PNG hoặc WEBP · tối đa 5 MB</small>
+              <div className="product-image-preview">
+                {productImagePreview ? (
+                  <img
+                    src={productImagePreview}
+                    alt="Xem trước ảnh sản phẩm"
+                    onError={() => setFormError("Không thể hiển thị ảnh này.")}
+                  />
+                ) : (
+                  <span>Chưa có ảnh sản phẩm</span>
+                )}
+                {productImagePreview && (
+                  <button
+                    type="button"
+                    className="text-button text-danger"
+                    disabled={busy}
+                    onClick={() => {
+                      setProductImageFile(null);
+                      setRemoveProductImage(true);
+                      const input = document.getElementById(
+                        "product-image-input",
+                      );
+                      if (input) input.value = "";
+                    }}
+                  >
+                    Gỡ ảnh
+                  </button>
+                )}
+              </div>
+            </div>
             {productDialog.productId && (
               <label>
                 Trạng thái
@@ -2986,6 +3213,7 @@ function AccountsPage({
   onEditRole,
   token,
   onUserCreated,
+  onUserDeleted,
   onSessionExpired,
   onNotice,
 }) {
@@ -2993,6 +3221,9 @@ function AccountsPage({
   const [createOpen, setCreateOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const filtered = users.filter((user) =>
     `${user.fullname} ${user.email} ${user.role}`
       .toLowerCase()
@@ -3033,6 +3264,24 @@ function AccountsPage({
       else setCreateError(createRequestError.message);
     } finally {
       setCreateBusy(false);
+    }
+  }
+
+  async function deleteUser() {
+    if (!deleteTarget) return;
+    setDeleteBusy(true);
+    setDeleteError("");
+    try {
+      const userId = deleteTarget.user_id || deleteTarget.id;
+      await dashboardApi.deleteUser(userId, token);
+      onUserDeleted(userId);
+      onNotice(`Đã xóa tài khoản ${deleteTarget.fullname}.`);
+      setDeleteTarget(null);
+    } catch (deleteRequestError) {
+      if (deleteRequestError.status === 401) onSessionExpired();
+      else setDeleteError(deleteRequestError.message);
+    } finally {
+      setDeleteBusy(false);
     }
   }
   return (
@@ -3150,18 +3399,31 @@ function AccountsPage({
                         </span>
                       </td>
                       <td>
-                        <select
-                          className="role-select"
-                          value={user.role}
-                          disabled={isCurrent}
-                          aria-label={`Vai trò của ${user.fullname}`}
-                          onChange={(event) =>
-                            onEditRole(user, event.target.value)
-                          }
-                        >
-                          <option value="ADMIN">ADMIN</option>
-                          <option value="OPERATOR">OPERATOR</option>
-                        </select>
+                        <div className="account-actions">
+                          <select
+                            className="role-select"
+                            value={user.role}
+                            disabled={isCurrent}
+                            aria-label={`Vai trò của ${user.fullname}`}
+                            onChange={(event) =>
+                              onEditRole(user, event.target.value)
+                            }
+                          >
+                            <option value="ADMIN">ADMIN</option>
+                            <option value="OPERATOR">OPERATOR</option>
+                          </select>
+                          <button
+                            className="button button-danger button-small"
+                            disabled={isCurrent}
+                            aria-label={`Xóa tài khoản ${user.fullname}`}
+                            onClick={() => {
+                              setDeleteError("");
+                              setDeleteTarget(user);
+                            }}
+                          >
+                            Xóa
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -3277,6 +3539,63 @@ function AccountsPage({
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !deleteBusy)
+              setDeleteTarget(null);
+          }}
+        >
+          <div
+            className="confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-user-title"
+          >
+            <button
+              className="modal-close icon-button"
+              aria-label="Đóng"
+              disabled={deleteBusy}
+              onClick={() => setDeleteTarget(null)}
+            >
+              <Icon name="close" />
+            </button>
+            <div className="modal-icon">
+              <Icon name="info" size={22} />
+            </div>
+            <p className="eyebrow">QUẢN TRỊ TÀI KHOẢN</p>
+            <h2 id="delete-user-title">Xác nhận xóa tài khoản</h2>
+            <p>
+              Bạn sắp xóa tài khoản <strong>{deleteTarget.fullname}</strong> (
+              {deleteTarget.email}). Lịch sử nhập hàng có liên quan sẽ chặn thao
+              tác để bảo toàn dữ liệu.
+            </p>
+            {deleteError && (
+              <p className="form-error" role="alert">
+                {deleteError}
+              </p>
+            )}
+            <div className="modal-actions">
+              <button
+                className="button button-quiet"
+                disabled={deleteBusy}
+                onClick={() => setDeleteTarget(null)}
+              >
+                Hủy
+              </button>
+              <button
+                className="button button-danger"
+                disabled={deleteBusy}
+                onClick={deleteUser}
+              >
+                {deleteBusy ? "Đang xóa..." : "Xác nhận xóa"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>

@@ -100,6 +100,7 @@ describe('Auth API', () => {
   }, async () => {
     const noToken = await request(app).get('/api/admin/users').expect(401);
     assert.match(noToken.body.message, /Bearer token/);
+    await request(app).delete(`/api/admin/users/${randomUUID()}`).expect(401);
 
     await request(app)
       .get('/api/admin/users')
@@ -149,6 +150,10 @@ describe('Auth API', () => {
         .set('Authorization', `Bearer ${operatorToken}`)
         .send({ role: 'OPERATOR' })
         .expect(403);
+      await request(app)
+        .delete(`/api/admin/users/${adminId}`)
+        .set('Authorization', `Bearer ${operatorToken}`)
+        .expect(403);
     } finally {
       if (temporaryPermission) {
         await pool.query(
@@ -177,7 +182,7 @@ describe('Auth API', () => {
     assert.ok(response.body.users.length > 0);
     assert.equal(Object.hasOwn(response.body.users[0], 'password_hash'), false);
 
-    await request(app)
+    const createdAdmin = await request(app)
       .post('/api/admin/users')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
@@ -227,6 +232,21 @@ describe('Auth API', () => {
       .send({ email: adminCreatedEmail, password })
       .expect(200);
     assert.equal(createdLogin.body.user.role, 'ADMIN');
+
+    await request(app)
+      .delete(`/api/admin/users/${adminId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(400);
+    await request(app)
+      .delete(`/api/admin/users/${createdAdmin.body.user.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200)
+      .expect(({ body }) => assert.equal(body.user.id, createdAdmin.body.user.id));
+    const deletedUser = await pool.query(
+      'SELECT 1 FROM users WHERE user_id = $1',
+      [createdAdmin.body.user.id],
+    );
+    assert.equal(deletedUser.rowCount, 0);
 
     const changedRole = await request(app)
       .patch(`/api/admin/users/${operatorId}/role`)

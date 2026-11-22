@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, unwrap } from "./api.js";
 
 const money = new Intl.NumberFormat("vi-VN", {
@@ -93,7 +93,8 @@ function productArt(name = "", category = "") {
   return categoryEmoji(category);
 }
 
-function productImage(name = "") {
+function productImage(name = "", uploadedImageUrl = "") {
+  if (uploadedImageUrl) return uploadedImageUrl;
   const value = name.toLowerCase();
   if (value.includes("nước ép táo")) return "/products/apple-juice.png";
   if (value.includes("nước ép chanh dây")) return "/products/passionfruit-juice.png";
@@ -163,6 +164,7 @@ export default function App() {
   const [flow, setFlow] = useState(null);
   const [loading, setLoading] = useState(true);
   const [inventoryLoading, setInventoryLoading] = useState(false);
+  const inventoryRequestRef = useRef(0);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [checkoutError, setCheckoutError] = useState("");
@@ -255,22 +257,31 @@ export default function App() {
   }, []);
 
   const loadInventory = useCallback(async (id, quiet = false) => {
+    const requestId = ++inventoryRequestRef.current;
     if (!id) {
       setInventory([]);
+      setInventoryLoading(false);
       return;
     }
-    if (!quiet) setInventoryLoading(true);
+    if (!quiet) {
+      setInventoryLoading(true);
+      setInventory([]);
+    }
     try {
       const payload = unwrap(
         await api.get("/api/inventory/machines/" + encodeURIComponent(id)),
       );
+      if (requestId !== inventoryRequestRef.current) return;
       setInventory(Array.isArray(payload) ? payload : payload?.items || []);
       setError("");
     } catch (requestError) {
+      if (requestId !== inventoryRequestRef.current) return;
       setInventory([]);
       setError(requestError.message);
     } finally {
-      if (!quiet) setInventoryLoading(false);
+      if (requestId === inventoryRequestRef.current) {
+        setInventoryLoading(false);
+      }
     }
   }, []);
 
@@ -307,8 +318,22 @@ export default function App() {
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (machineId) loadInventory(machineId, true);
-    }, 30000);
+    }, 15000);
     return () => window.clearInterval(timer);
+  }, [machineId, loadInventory]);
+
+  useEffect(() => {
+    const refreshVisibleInventory = () => {
+      if (document.visibilityState === "visible" && machineId) {
+        loadInventory(machineId, true);
+      }
+    };
+    window.addEventListener("focus", refreshVisibleInventory);
+    document.addEventListener("visibilitychange", refreshVisibleInventory);
+    return () => {
+      window.removeEventListener("focus", refreshVisibleInventory);
+      document.removeEventListener("visibilitychange", refreshVisibleInventory);
+    };
   }, [machineId, loadInventory]);
 
   const stockForProduct = useCallback(
@@ -325,7 +350,8 @@ export default function App() {
         )
         .map((row) => ({
           slotId: row.slot_id || row.slotId,
-          slotCode: row.slot_code || row.slotCode || "Khe",
+          slotCode: row.slot_code || row.slotCode || "",
+          quantity: Number(row.quantity || 0),
           available: Number(
             row.available_quantity ??
               row.availableQuantity ??
@@ -851,6 +877,9 @@ export default function App() {
                 product.category_name ||
                 "";
               const slots = stockForProduct(productId);
+              const slotCodes = [...new Set(
+                slots.filter((slot) => slot.quantity > 0 && slot.slotCode).map((slot) => slot.slotCode),
+              )].sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
               const available = slots.reduce(
                 (sum, slot) => sum + Math.max(0, slot.available),
                 0,
@@ -858,7 +887,10 @@ export default function App() {
               const inCart = cart[productId]?.quantity || 0;
               const canAdd = Boolean(machineOnline && available > inCart);
               const productName = productNameOf(product);
-              const image = productImage(productName);
+              const image = productImage(
+                productName,
+                product.imageUrl || product.image_url || "",
+              );
               return (
                 <article
                   className="product-card"
@@ -869,15 +901,25 @@ export default function App() {
                     <span className="art-orbit orbit-one" />
                     <span className="art-orbit orbit-two" />
                     {image ? (
-                      <img
-                        className={
-                          "product-photo" +
-                          (image.includes("juice") ? " juice-photo" : "")
-                        }
-                        src={image}
-                        alt={productName}
-                        loading="lazy"
-                      />
+                      <>
+                        <img
+                          className={
+                            "product-photo" +
+                            (image.includes("juice") ? " juice-photo" : "")
+                          }
+                          src={image}
+                          alt={productName}
+                          loading="lazy"
+                          onError={(event) => {
+                            event.currentTarget.hidden = true;
+                            const fallback = event.currentTarget.nextElementSibling;
+                            if (fallback) fallback.hidden = false;
+                          }}
+                        />
+                        <span className="fruit-emoji" hidden>
+                          {productArt(productName, categoryName)}
+                        </span>
+                      </>
                     ) : (
                       <span className="fruit-emoji">
                         {productArt(productName, categoryName)}
@@ -906,6 +948,11 @@ export default function App() {
                       {product.description ||
                         "Tươi ngon, được chọn lọc mỗi ngày."}
                     </p>
+                    {slotCodes.length > 0 && (
+                      <p className="slot-location">
+                        <strong>{"V\u1ecb tr\u00ed:"}</strong> {slotCodes.join(", ")}
+                      </p>
+                    )}
                     <div className="product-bottom">
                       <div>
                         <strong className="product-price">
@@ -1024,11 +1071,30 @@ export default function App() {
                   {cartItems.map((item) => (
                     <div className="cart-item" key={item.productId}>
                       <div className="cart-thumb">
-                        {productImage(productNameOf(item.product)) ? (
-                          <img
-                            src={productImage(productNameOf(item.product))}
-                            alt={productNameOf(item.product)}
-                          />
+                        {productImage(
+                          productNameOf(item.product),
+                          item.product.imageUrl || item.product.image_url || "",
+                        ) ? (
+                          <>
+                            <img
+                              src={productImage(
+                                productNameOf(item.product),
+                                item.product.imageUrl || item.product.image_url || "",
+                              )}
+                              alt={productNameOf(item.product)}
+                              onError={(event) => {
+                                event.currentTarget.hidden = true;
+                                const fallback = event.currentTarget.nextElementSibling;
+                                if (fallback) fallback.hidden = false;
+                              }}
+                            />
+                            <span hidden>
+                              {productArt(
+                                productNameOf(item.product),
+                                item.product.category?.name,
+                              )}
+                            </span>
+                          </>
                         ) : (
                           productArt(
                             productNameOf(item.product),

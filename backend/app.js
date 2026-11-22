@@ -5,10 +5,19 @@
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
 const express = require("express");
+const path = require("node:path");
 const errorHandler = require("./src/middleware/errorHandler");
 const { checkConnection } = require("./src/config/db");
 
 const app = express();
+
+app.use(
+  '/uploads/products',
+  express.static(path.join(__dirname, 'uploads', 'products'), {
+    maxAge: '1d',
+    immutable: true,
+  }),
+);
 
 // ── Middleware toàn cục ───────────────────────────────────────────────────────
 app.use(express.json()); // parse JSON request body

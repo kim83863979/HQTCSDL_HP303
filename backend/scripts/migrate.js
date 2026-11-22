@@ -10,6 +10,14 @@ const MIGRATION_PATTERN = /^(\d{14})_[a-z0-9_]+\.sql$/i;
 const LEGACY_MIGRATION = '20261107010000_order_payment_inventory.sql';
 const LEGACY_FIX_MIGRATION = '20261107020000_fix_order_source_triggers.sql';
 
+function migrationChecksums(sql) {
+  const normalizedSql = sql.replace(/\r\n?/g, '\n');
+  return {
+    checksum: crypto.createHash('sha256').update(normalizedSql).digest('hex'),
+    rawChecksum: crypto.createHash('sha256').update(sql).digest('hex'),
+  };
+}
+
 const LEGACY_CONSTRAINTS = [
   'chk_inventories_reserved_quantity',
   'uq_inventories_slot_product',
@@ -66,7 +74,7 @@ function loadMigrations(directory = MIGRATIONS_DIR) {
         version: match[1],
         name,
         sql,
-        checksum: crypto.createHash('sha256').update(sql).digest('hex'),
+        ...migrationChecksums(sql),
       };
     });
 }
@@ -185,7 +193,10 @@ function validateLedger(ledger, migrations) {
     if (!migration) {
       throw new Error(`Database has unknown migration ${version} (${applied.name}).`);
     }
-    if (migration.name !== applied.name || migration.checksum !== applied.checksum.trim()) {
+    const appliedChecksum = applied.checksum.trim();
+    if (migration.name !== applied.name
+        || (migration.checksum !== appliedChecksum
+          && migration.rawChecksum !== appliedChecksum)) {
       throw new Error(
         `Migration ${applied.name} differs from its recorded checksum. ` +
         'Do not edit an applied migration; create a new migration instead.',
@@ -358,5 +369,7 @@ if (require.main === module) {
 module.exports = {
   classifyLegacyMigrationState,
   loadMigrations,
+  migrationChecksums,
   stripOuterTransaction,
+  validateLedger,
 };

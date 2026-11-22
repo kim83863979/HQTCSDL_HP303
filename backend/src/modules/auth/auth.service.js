@@ -73,9 +73,31 @@ async function changeUserRole(userId, roleName, requesterId) {
   if (!(await userRepository.roleExists(roleName))) {
     throw new AuthError(500, `Role ${roleName} chưa được khởi tạo trong database.`);
   }
-  const user = await userRepository.updateRole(userId, roleName);
-  if (!user) throw new AuthError(404, 'Không tìm thấy người dùng.');
-  return publicUser(user);
+  const result = await userRepository.updateRoleSafely(userId, roleName);
+  if (result.reason === 'NOT_FOUND') throw new AuthError(404, 'Không tìm thấy người dùng.');
+  if (result.reason === 'LAST_ADMIN') {
+    throw new AuthError(409, 'Không thể hạ quyền quản trị viên cuối cùng.');
+  }
+  if (!result.user) throw new AuthError(500, 'Không thể cập nhật vai trò người dùng.');
+  return publicUser(result.user);
 }
 
-module.exports = { register, login, getProfile, listUsers, changeUserRole };
+async function deleteUser(userId, requesterId) {
+  if (userId.toLowerCase() === requesterId.toLowerCase()) {
+    throw new AuthError(400, 'Không thể tự xóa tài khoản đang đăng nhập.');
+  }
+  const result = await userRepository.deleteUserSafely(userId);
+  if (result.reason === 'NOT_FOUND') throw new AuthError(404, 'Không tìm thấy người dùng.');
+  if (result.reason === 'INVALID_ROLE') {
+    throw new AuthError(400, 'Chỉ có thể xóa tài khoản Admin hoặc Operator.');
+  }
+  if (result.reason === 'LAST_ADMIN') {
+    throw new AuthError(409, 'Không thể xóa tài khoản quản trị viên cuối cùng.');
+  }
+  if (result.reason === 'HAS_RESTOCK_HISTORY') {
+    throw new AuthError(409, `Không thể xóa tài khoản vì đang được tham chiếu bởi ${result.count} bản ghi lịch sử nhập hàng.`);
+  }
+  return { id: result.userId };
+}
+
+module.exports = { register, login, getProfile, listUsers, changeUserRole, deleteUser };

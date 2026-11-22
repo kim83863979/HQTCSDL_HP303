@@ -1,14 +1,20 @@
 const express = require('express');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const { pool } = require('../../config/db');
 const httpError = require('../../shared/httpError');
-const { authenticateToken, requirePermissions } = require('../auth/auth.middleware');
+const { authenticateToken, requirePermissions, requireRoles } = require('../auth/auth.middleware');
+const { inspectProductImage, IMAGE_MAX_BYTES } = require('./product-image');
 
 const router = express.Router();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PRODUCT_STATUSES = new Set(['ACTIVE', 'INACTIVE']);
+const PRODUCT_UPLOAD_DIR = path.resolve(__dirname, '../../../uploads/products');
 const PRODUCT_SELECT = `
   SELECT p.product_id AS "productId", p.product_name AS "productName",
          p.description, p.unit_price AS "unitPrice", p.status,
+         to_jsonb(p)->>'image_url' AS "imageUrl",
          p.category_id AS "categoryId", c.category_name AS "categoryName",
          p.created_at AS "createdAt", p.updated_at AS "updatedAt"
   FROM public.products p
@@ -25,6 +31,47 @@ const CATEGORY_SELECT = `
 
 router.use('/products', authenticateToken, requirePermissions('MANAGE_PRODUCT'));
 router.use('/categories', authenticateToken, requirePermissions('MANAGE_PRODUCT'));
+
+function validateProductId(productId) {
+  if (!UUID_RE.test(productId || '')) {
+    throw httpError(400, 'INVALID_PRODUCT_ID', 'productId phải là UUID hợp lệ.');
+  }
+}
+
+function imageDiskPath(imageUrl) {
+  const prefix = '/uploads/products/';
+  if (typeof imageUrl !== 'string' || !imageUrl.startsWith(prefix)) return null;
+  const filename = imageUrl.slice(prefix.length);
+  if (!/^[0-9a-f-]{36}\.(jpg|png|webp)$/.test(filename)) return null;
+  return path.join(PRODUCT_UPLOAD_DIR, filename);
+}
+
+async function removeProductImageFile(imageUrl) {
+  const diskPath = imageDiskPath(imageUrl);
+  if (!diskPath) return;
+  try {
+    await fs.unlink(diskPath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.error('[PRODUCT IMAGE] Cleanup failed:', error.message);
+  }
+}
+
+async function requireProductImageSchema(queryable = pool) {
+  const result = await queryable.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'products'
+         AND column_name = 'image_url'
+     ) AS available`,
+  );
+  if (!result.rows[0].available) {
+    throw httpError(
+      503,
+      'PRODUCT_IMAGE_SCHEMA_PENDING',
+      'Chưa thể lưu ảnh: cần áp dụng migration 20261122100000_add_product_image_url.sql.',
+    );
+  }
+}
 
 function parsePagination(query) {
   const page = query.page === undefined ? 1 : Number(query.page);
@@ -227,6 +274,125 @@ router.patch('/products/:productId', async (req, res, next) => {
     });
   } catch (error) {
     return next(mapDatabaseError(error, 'Sản phẩm'));
+  }
+});
+
+router.delete('/products/:productId', requireRoles('ADMIN'), async (req, res, next) => {
+  const client = await pool.connect();
+  let oldImageUrl = null;
+  try {
+    validateProductId(req.params.productId);
+    await client.query('BEGIN');
+    const current = await client.query(
+      `SELECT product_id, to_jsonb(p)->>'image_url' AS image_url
+       FROM public.products p WHERE product_id = $1 FOR UPDATE`,
+      [req.params.productId],
+    );
+    if (!current.rowCount) throw httpError(404, 'PRODUCT_NOT_FOUND', 'Không tìm thấy sản phẩm.');
+    oldImageUrl = current.rows[0].image_url;
+    const references = await client.query(
+      `SELECT EXISTS (SELECT 1 FROM public.inventories WHERE product_id = $1) AS inventory,
+              EXISTS (SELECT 1 FROM public.order_items WHERE product_id = $1) AS orders`,
+      [req.params.productId],
+    );
+    if (references.rows[0].inventory || references.rows[0].orders) {
+      await client.query(
+        `UPDATE public.products SET status = 'INACTIVE', updated_at = CURRENT_TIMESTAMP
+         WHERE product_id = $1`,
+        [req.params.productId],
+      );
+      await client.query('COMMIT');
+      return res.json({
+        success: true,
+        data: { productId: req.params.productId, deleted: false, status: 'INACTIVE' },
+        message: 'Sản phẩm đã có dữ liệu liên quan nên được chuyển sang INACTIVE; lịch sử được giữ nguyên.',
+      });
+    }
+    await client.query('DELETE FROM public.products WHERE product_id = $1', [req.params.productId]);
+    await client.query('COMMIT');
+    await removeProductImageFile(oldImageUrl);
+    return res.json({
+      success: true,
+      data: { productId: req.params.productId, deleted: true },
+      message: 'Đã xóa sản phẩm.',
+    });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    return next(mapDatabaseError(error, 'Sản phẩm'));
+  } finally {
+    client.release();
+  }
+});
+
+router.post(
+  '/products/:productId/image',
+  requireRoles('ADMIN'),
+  express.raw({ type: 'application/octet-stream', limit: IMAGE_MAX_BYTES }),
+  async (req, res, next) => {
+    let imagePath;
+    let client;
+    try {
+      validateProductId(req.params.productId);
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        throw httpError(400, 'EMPTY_IMAGE', 'Hãy chọn một tệp ảnh để tải lên.');
+      }
+      const image = inspectProductImage(req.body, req.get('x-image-content-type'));
+      await requireProductImageSchema();
+      const filename = `${randomUUID()}.${image.extension}`;
+      imagePath = path.join(PRODUCT_UPLOAD_DIR, filename);
+      await fs.mkdir(PRODUCT_UPLOAD_DIR, { recursive: true });
+      await fs.writeFile(imagePath, req.body, { flag: 'wx' });
+
+      client = await pool.connect();
+      await client.query('BEGIN');
+      const current = await client.query(
+        'SELECT image_url FROM public.products WHERE product_id = $1 FOR UPDATE',
+        [req.params.productId],
+      );
+      if (!current.rowCount) throw httpError(404, 'PRODUCT_NOT_FOUND', 'Không tìm thấy sản phẩm.');
+      const imageUrl = `/uploads/products/${filename}`;
+      await client.query(
+        `UPDATE public.products SET image_url = $2, updated_at = CURRENT_TIMESTAMP
+         WHERE product_id = $1`,
+        [req.params.productId, imageUrl],
+      );
+      await client.query('COMMIT');
+      await removeProductImageFile(current.rows[0].image_url);
+      return res.json({ success: true, data: { productId: req.params.productId, imageUrl } });
+    } catch (error) {
+      if (client) await client.query('ROLLBACK').catch(() => {});
+      if (imagePath) await fs.unlink(imagePath).catch(() => {});
+      return next(mapDatabaseError(error, 'Sản phẩm'));
+    } finally {
+      client?.release();
+    }
+  },
+);
+
+router.delete('/products/:productId/image', requireRoles('ADMIN'), async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    validateProductId(req.params.productId);
+    await requireProductImageSchema(client);
+    await client.query('BEGIN');
+    const current = await client.query(
+      'SELECT image_url FROM public.products WHERE product_id = $1 FOR UPDATE',
+      [req.params.productId],
+    );
+    if (!current.rowCount) throw httpError(404, 'PRODUCT_NOT_FOUND', 'Không tìm thấy sản phẩm.');
+    const result = await client.query(
+      `UPDATE public.products SET image_url = NULL, updated_at = CURRENT_TIMESTAMP
+       WHERE product_id = $1 RETURNING product_id`,
+      [req.params.productId],
+    );
+    await client.query('COMMIT');
+    await removeProductImageFile(current.rows[0].image_url);
+    return res.json({ success: true, data: { productId: req.params.productId, imageUrl: null } });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    return next(error);
+  } finally {
+    client.release();
   }
 });
 

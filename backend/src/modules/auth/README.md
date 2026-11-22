@@ -16,7 +16,11 @@ hay tự tạo bảng. Mật khẩu được băm bằng bcryptjs, JWT có thờ
   đăng ký công khai.
 - `PATCH /api/admin/users/:userId/role`: chỉ Admin có permission `MANAGE_USER`
   được đổi role; role chỉ nhận `ADMIN` hoặc `OPERATOR`, và người dùng không thể
-  tự đổi role của mình.
+  tự đổi role của mình. Không thể hạ quyền quản trị viên cuối cùng.
+- `DELETE /api/admin/users/:userId`: chỉ Admin có permission `MANAGE_USER` được
+  xóa tài khoản `ADMIN` hoặc `OPERATOR`; không thể tự xóa hoặc xóa Admin cuối
+  cùng. Tài khoản có lịch sử nhập hàng không thể xóa để bảo toàn dữ liệu nghiệp
+  vụ; API trả `409` và giữ nguyên lịch sử.
 - API đọc máy yêu cầu `VIEW_MACHINE`; API đọc tồn kho yêu cầu
   `MANAGE_INVENTORY`. Telemetry simulator dùng shared device key riêng.
 

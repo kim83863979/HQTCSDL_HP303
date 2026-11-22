@@ -52,4 +52,20 @@ router.patch('/users/:userId/role', authenticateToken, requirePermissions('MANAG
   }
 });
 
+router.delete('/users/:userId', authenticateToken, requirePermissions('MANAGE_USER'), requireRoles('ADMIN'), async (req, res, next) => {
+  const { userId } = req.params;
+  if (!UUID_RE.test(userId)) {
+    return res.status(400).json({ message: 'userId phải là UUID hợp lệ.' });
+  }
+  try {
+    const result = await authService.deleteUser(userId, req.auth.userId);
+    return res.status(200).json({ message: 'Đã xóa tài khoản.', user: result });
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return res.status(error.status).json({ message: error.message });
+    }
+    return next(error);
+  }
+});
+
 module.exports = router;

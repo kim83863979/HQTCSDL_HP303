@@ -1,0 +1,9 @@
+BEGIN;
+
+ALTER TABLE public.products
+    ADD COLUMN IF NOT EXISTS image_url text;
+
+COMMENT ON COLUMN public.products.image_url IS
+    'Public URL path for the product image stored by the backend.';
+
+COMMIT;

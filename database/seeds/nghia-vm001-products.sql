@@ -1,7 +1,6 @@
--- FreshVend demo catalog for VM001, exported from the local demo database.
+-- FreshVend demo catalog for VM001.
 -- Run after schema migrations and the 50-slot provisioning migration.
--- Safe to run again: existing inventory quantities are preserved.
--- If a target slot is occupied by another product, the transaction stops.
+-- Existing slot assignments and stock are preserved; new products use empty slots.
 BEGIN;
 
 INSERT INTO public.categories (category_name, description) VALUES
@@ -41,17 +40,18 @@ BEGIN
     ('A01', 'Táo', 10),
     ('A02', 'Cam', 8),
     ('A03', 'Chuối', 14),
-    ('A04', 'Lê', 5),
-    ('A05', 'Ổi', 5),
-    ('A06', 'Mix 3 loại trái cây', 5),
-    ('A07', 'Mix 5 loại trái cây', 5),
-    ('A08', 'Quýt', 5),
-    ('A09', 'Nước ép táo', 5),
-    ('A10', 'Nước ép chanh dây', 5),
-    ('A11', 'Nước ép cam', 5),
-    ('A12', 'Nước ép xoài', 5),
-    ('A13', 'Nước ép dưa hấu', 5),
-    ('A14', 'Dưa hấu', 5)
+    -- A04 currently contains Apple stock; preserve that existing assignment.
+    ('A05', 'Lê', 5),
+    ('A06', 'Ổi', 5),
+    ('A07', 'Mix 3 loại trái cây', 5),
+    ('A08', 'Mix 5 loại trái cây', 5),
+    ('A09', 'Quýt', 5),
+    ('A10', 'Nước ép táo', 5),
+    ('A11', 'Nước ép chanh dây', 5),
+    ('A12', 'Nước ép cam', 5),
+    ('A13', 'Nước ép xoài', 5),
+    ('A14', 'Nước ép dưa hấu', 5),
+    ('A15', 'Dưa hấu', 5)
   ) AS items(slot_code,product_name,initial_quantity) LOOP
     SELECT s.slot_id,s.capacity INTO v_slot,v_capacity FROM public.machine_slots s JOIN public.machines m ON m.machine_id=s.machine_id WHERE m.machine_code='VM001' AND s.slot_code=v_code;
     IF v_slot IS NULL THEN RAISE EXCEPTION 'Missing VM001 slot %; run slot provisioning migration first',v_code; END IF;

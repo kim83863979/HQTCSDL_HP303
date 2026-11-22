@@ -117,6 +117,26 @@ export const dashboardApi = {
     token,
     body: JSON.stringify(payload),
   }),
+  deleteProduct: (id, token) => apiRequest(`/admin/products/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    token,
+  }),
+  uploadProductImage: (id, file, token) => apiRequest(
+    `/admin/products/${encodeURIComponent(id)}/image`,
+    {
+      method: 'POST',
+      token,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-Image-Content-Type': file.type,
+      },
+      body: file,
+    },
+  ),
+  deleteProductImage: (id, token) => apiRequest(
+    `/admin/products/${encodeURIComponent(id)}/image`,
+    { method: 'DELETE', token },
+  ),
   createCategory: (payload, token) => apiRequest('/admin/categories', {
     method: 'POST',
     token,
@@ -176,6 +196,10 @@ export const dashboardApi = {
     method: 'PATCH',
     token,
     body: JSON.stringify({ role }),
+  }),
+  deleteUser: (id, token) => apiRequest(`/admin/users/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    token,
   }),
 };
 
