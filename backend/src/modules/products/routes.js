@@ -36,6 +36,7 @@ router.get('/', async (req, res, next) => {
     const data = await query(
       `SELECT p.product_id AS "productId", p.product_name AS "productName",
               p.description, p.unit_price AS "unitPrice", p.status,
+              p.image_url AS "imageUrl",
               p.category_id AS "categoryId", c.category_name AS "categoryName",
               p.created_at AS "createdAt", p.updated_at AS "updatedAt"
          FROM products p JOIN categories c ON c.category_id = p.category_id
@@ -64,6 +65,7 @@ router.get('/:productId', async (req, res, next) => {
     const result = await query(
       `SELECT p.product_id AS "productId", p.product_name AS "productName",
               p.description, p.unit_price AS "unitPrice", p.status,
+              p.image_url AS "imageUrl",
               p.category_id AS "categoryId", c.category_name AS "categoryName",
               p.created_at AS "createdAt", p.updated_at AS "updatedAt"
          FROM products p JOIN categories c ON c.category_id = p.category_id

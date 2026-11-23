@@ -1,5 +1,6 @@
 // src/modules/machines/machine.controller.js
 const machineService = require('./machine.service');
+const dispenseService = require('../iot/dispense.service');
 
 const handleControllerError = (res, err, defaultMessage) => {
   if (err instanceof machineService.ServiceError) {
@@ -10,6 +11,13 @@ const handleControllerError = (res, err, defaultMessage) => {
     };
     if (err.details) responseBody.details = err.details;
     return res.status(err.statusCode).json(responseBody);
+  }
+  if (Number.isInteger(err.statusCode) && err.statusCode >= 400 && err.statusCode < 600) {
+    return res.status(err.statusCode).json({
+      success: false,
+      errorCode: err.statusCode === 503 ? 'MQTT_UNAVAILABLE' : 'INVALID_MACHINE_COMMAND',
+      message: err.message,
+    });
   }
   console.error('[MACHINE_CONTROLLER_ERROR]:', err.message);
   return res.status(500).json({
@@ -34,6 +42,19 @@ const getMachineById = async (req, res) => {
     return res.status(200).json({ success: true, message: 'Lấy chi tiết máy thành công', data: machine });
   } catch (err) {
     return handleControllerError(res, err, 'Lỗi máy chủ khi truy vấn chi tiết máy');
+  }
+};
+
+const setDemoMachineRunning = (running) => async (req, res) => {
+  try {
+    const machine = await machineService.setDemoMachineRunning(req.params.id, running);
+    return res.status(200).json({
+      success: true,
+      message: running ? 'Đã bật máy mô phỏng' : 'Đã tắt máy mô phỏng',
+      data: machine,
+    });
+  } catch (err) {
+    return handleControllerError(res, err, 'Lỗi máy chủ khi điều khiển máy mô phỏng');
   }
 };
 
@@ -110,9 +131,20 @@ const receiveSimulatorStatus = async (req, res) => {
   }
 };
 
+const sendControlCommand = async (req, res) => {
+  try {
+    const { action, columnId } = req.body || {};
+    const result = await dispenseService.publishControl(req.params.id, action, columnId);
+    return res.status(202).json({ success: true, message: 'Lệnh điều khiển đã được gửi qua MQTT.', data: result });
+  } catch (err) {
+    return handleControllerError(res, err, 'Lỗi máy chủ khi gửi lệnh điều khiển');
+  }
+};
+
 module.exports = {
   getAllMachines,
   getMachineById,
+  setDemoMachineRunning,
   getMachineSlots,
   checkConsistency,
   createSlot,
@@ -120,4 +152,5 @@ module.exports = {
   resolveOrderSlots,
   getOrderDispensePlan,
   receiveSimulatorStatus,
+  sendControlCommand,
 };

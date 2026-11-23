@@ -3,6 +3,7 @@
 
 const assert = require('node:assert/strict');
 const { after, before, describe, it } = require('node:test');
+const { randomUUID } = require('node:crypto');
 const request = require('supertest');
 
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
@@ -11,22 +12,30 @@ const app = require('../app');
 const { pool } = require('../src/config/db');
 
 const MISSING_ID = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
-const fixture = {};
+const fixture = { productId: null, categoryId: null, productName: null, unitPrice: 7.25 };
 
 before(async () => {
-  const { rows } = await pool.query(
-    `SELECT p.product_id, p.product_name, p.unit_price, c.category_id
-     FROM products p
-     JOIN categories c ON c.category_id = p.category_id
-     WHERE p.status = 'ACTIVE'
-     ORDER BY p.product_name, p.product_id
-     LIMIT 1`,
+  const suffix = randomUUID();
+  const category = await pool.query(
+    `INSERT INTO categories (category_name, description)
+     VALUES ($1, 'Isolated product API test fixture') RETURNING category_id`,
+    [`Products API Test ${suffix}`],
   );
-  assert.ok(rows[0], 'Run the database migration and seed data before this test');
-  Object.assign(fixture, rows[0]);
+  fixture.categoryId = category.rows[0].category_id;
+  const product = await pool.query(
+    `INSERT INTO products (category_id, product_name, unit_price, status)
+     VALUES ($1, $2, $3, 'ACTIVE') RETURNING product_id, product_name`,
+    [fixture.categoryId, `Products API Test Item ${suffix}`, fixture.unitPrice],
+  );
+  fixture.productId = product.rows[0].product_id;
+  fixture.productName = product.rows[0].product_name;
 });
 
-after(() => pool.end());
+after(async () => {
+  if (fixture.productId) await pool.query('DELETE FROM products WHERE product_id = $1', [fixture.productId]);
+  if (fixture.categoryId) await pool.query('DELETE FROM categories WHERE category_id = $1', [fixture.categoryId]);
+  await pool.end();
+});
 
 describe('GET /api/products', () => {
   it('returns active products with pagination', async () => {
@@ -41,13 +50,13 @@ describe('GET /api/products', () => {
 
   it('filters by category and supports page/limit', async () => {
     const res = await request(app)
-      .get(`/api/products?categoryId=${fixture.category_id}&page=1&limit=1`)
+      .get(`/api/products?categoryId=${fixture.categoryId}&page=1&limit=1`)
       .expect(200);
     assert.equal(res.body.success, true);
     assert.equal(res.body.pagination.limit, 1);
     assert.ok(res.body.data.length <= 1);
     res.body.data.forEach((product) => {
-      assert.equal(product.categoryId, fixture.category_id);
+      assert.equal(product.categoryId, fixture.categoryId);
       assert.equal(product.status, 'ACTIVE');
     });
   });
@@ -70,13 +79,13 @@ describe('GET /api/products', () => {
 describe('GET /api/products/:productId', () => {
   it('returns an active product with category information', async () => {
     const res = await request(app)
-      .get(`/api/products/${fixture.product_id}`)
+      .get(`/api/products/${fixture.productId}`)
       .expect(200);
     assert.equal(res.body.success, true);
-    assert.equal(res.body.data.productId, fixture.product_id);
-    assert.equal(res.body.data.productName, fixture.product_name);
-    assert.equal(res.body.data.unitPrice, Number(fixture.unit_price));
-    assert.equal(res.body.data.categoryId, fixture.category_id);
+    assert.equal(res.body.data.productId, fixture.productId);
+    assert.equal(res.body.data.productName, fixture.productName);
+    assert.equal(res.body.data.unitPrice, fixture.unitPrice);
+    assert.equal(res.body.data.categoryId, fixture.categoryId);
   });
 
   it('returns 404 for a product that is not for sale', async () => {
@@ -100,9 +109,9 @@ describe('GET /api/categories', () => {
 
   it('returns an existing category', async () => {
     const res = await request(app)
-      .get(`/api/categories/${fixture.category_id}`)
+      .get(`/api/categories/${fixture.categoryId}`)
       .expect(200);
-    assert.equal(res.body.data.categoryId, fixture.category_id);
+    assert.equal(res.body.data.categoryId, fixture.categoryId);
     assert.ok(res.body.data.categoryName);
   });
 

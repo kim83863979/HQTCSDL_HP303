@@ -33,8 +33,10 @@ before(async () => {
 after(() => pool.end());
 
 describe('Inventory API', () => {
-  it('rejects inventory queries without authentication', async () => {
-    await request(app).get(`/api/inventory/machines/${MACHINE_ID}`).expect(401);
+  it('allows public machine inventory reads for Guest Client and protects slot/admin operations', async () => {
+    await request(app).get(`/api/inventory/machines/${MACHINE_ID}`).expect(200);
+    await request(app).get(`/api/inventory/slots/${SLOT_ID}`).expect(401);
+    await request(app).get('/api/inventory/availability').expect(401);
   });
 
   it('rejects a missing reservation payload', { skip: !hasDatabase }, async () => {

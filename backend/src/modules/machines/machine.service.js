@@ -1,5 +1,7 @@
 // src/modules/machines/machine.service.js
 const Machine = require('./machine.model');
+const machineDemo = require('./machine.demo');
+const { DEFAULT_SLOT_CAPACITY } = require('../../config/slot-config');
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SLOT_CODE_REGEX = /^[A-Z][0-9]{1,3}$/; // VD: A1, A01, B02
@@ -86,8 +88,32 @@ const getMachineById = async (id) => {
     ...evaluatedMachine,
     isReadyForOrder: readiness.isReadyForOrder,
     unreadyReasons:  readiness.unreadyReasons,
+    demoControlAvailable: process.env.NODE_ENV !== 'production',
+    demoActive: machineDemo.isActive(machineId),
     slots,
   };
+};
+
+const setDemoMachineRunning = async (id, running) => {
+  if (process.env.NODE_ENV === 'production') {
+    throw new ServiceError(403, 'MACHINE_DEMO_DISABLED', 'Chế độ máy mô phỏng chỉ dùng trong môi trường phát triển.');
+  }
+  const machineId = validateUuid(id, 'MACHINE_ID');
+  const machine = await Machine.findById(machineId);
+  if (!machine) throw new ServiceError(404, 'MACHINE_NOT_FOUND', `Không tìm thấy máy ${machineId}.`);
+  if (running) {
+    if (machine.lifecycleStatus !== 'ACTIVE') {
+      throw new ServiceError(409, 'MACHINE_INACTIVE', 'Máy chưa được kích hoạt trong hệ thống.');
+    }
+    const current = evaluateConnectivity(machine);
+    if (current.isOnline && !machineDemo.isActive(machineId)) {
+      throw new ServiceError(409, 'MACHINE_ALREADY_ONLINE', 'Máy đã trực tuyến qua kết nối thiết bị.');
+    }
+    await machineDemo.start(machine);
+  } else if (!await machineDemo.stop(machineId)) {
+    throw new ServiceError(409, 'MACHINE_DEMO_NOT_RUNNING', 'Máy này không chạy ở chế độ mô phỏng.');
+  }
+  return getMachineById(machineId);
 };
 
 const getMachineSlots = async (id, { includeInventory = false } = {}) => {
@@ -200,7 +226,7 @@ const createMachineSlot = async (machineIdParam, payload = {}) => {
     throw new ServiceError(400, 'INVALID_PAYLOAD_FORMAT', 'Payload phải là JSON object.');
   }
 
-  const { slotCode, capacity = 20, status = 'ACTIVE' } = payload;
+  const { slotCode, capacity = DEFAULT_SLOT_CAPACITY, status = 'ACTIVE' } = payload;
   if (!slotCode || typeof slotCode !== 'string' || !SLOT_CODE_REGEX.test(slotCode.trim().toUpperCase())) {
     throw new ServiceError(400, 'INVALID_SLOT_CODE', 'Mã khe (slotCode) không hợp lệ (VD hợp lệ: A01, A02, B1).');
   }
@@ -476,7 +502,7 @@ const getOrderDispensePlan = async (orderIdParam) => {
     totalAmount:      order.totalAmount,
     allocations:      historicalAllocations,
     mqttDispensePayload: {
-      commandId:   `cmd_${order.orderId.slice(0, 8)}`,
+      commandId:   `cmd_${order.orderId}`,
       orderId:     order.orderId,
       machineId:   order.machineId,
       machineCode: resolution.machineCode,
@@ -496,6 +522,7 @@ const receiveSimulatorStatus = async (payload) => {
     machineCode,
     machineState,
     operationStatus,
+    connectionStatus,
     temperature,
     humidity,
     doorStatus = 'CLOSED',
@@ -513,6 +540,12 @@ const receiveSimulatorStatus = async (payload) => {
   const rawOpState = (operationStatus || machineState || 'IDLE').toUpperCase();
   if (!VALID_OPERATION_STATES.includes(rawOpState)) {
     throw new ServiceError(400, 'INVALID_MACHINE_STATE', 'Trạng thái máy không hợp lệ.');
+  }
+  const normalizedConnection = String(
+    connectionStatus || (rawOpState === 'OFFLINE' ? 'OFFLINE' : 'ONLINE'),
+  ).toUpperCase();
+  if (!['ONLINE', 'OFFLINE'].includes(normalizedConnection)) {
+    throw new ServiceError(400, 'INVALID_CONNECTION_STATUS', 'connectionStatus chỉ nhận ONLINE hoặc OFFLINE.');
   }
   const normalizedDoor = String(doorStatus).toUpperCase();
   if (!VALID_DOOR_STATUS.includes(normalizedDoor)) {
@@ -539,6 +572,7 @@ const receiveSimulatorStatus = async (payload) => {
 
   const isOutOfRange = parsedTemp !== null && (parsedTemp < machine.minTemperature || parsedTemp > machine.maxTemperature);
   const isUnauthorizedDoorOpen = normalizedDoor === 'OPEN' && rawOpState !== 'MAINTENANCE';
+  const alertConditions = [];
 
   let healthStatus = 'NORMAL';
   let resolvedErrorCode = errorCode;
@@ -550,21 +584,50 @@ const receiveSimulatorStatus = async (payload) => {
     resolvedErrorCode = resolvedErrorCode || 'SENSOR_DHT22_FAULT';
     warningMessage = 'Cảm biến DHT22 lỗi.';
     severity = 'ERROR';
+    alertConditions.push({
+      alertType: 'SENSOR_FAULT',
+      severity: 'CRITICAL',
+      message: warningMessage,
+    });
   } else if (isOutOfRange) {
     healthStatus = 'WARNING';
     resolvedErrorCode = resolvedErrorCode || 'TEMP_OUT_OF_RANGE';
     warningMessage = `Nhiệt độ ${parsedTemp}°C ngoài ngưỡng chuẩn.`;
     severity = 'WARNING';
+    alertConditions.push({
+      alertType: 'TEMPERATURE_OUT_OF_RANGE',
+      severity: 'WARNING',
+      message: `${warningMessage} Ngưỡng cho phép: ${machine.minTemperature}-${machine.maxTemperature}°C.`,
+    });
   } else if (isUnauthorizedDoorOpen) {
     healthStatus = 'WARNING';
     resolvedErrorCode = resolvedErrorCode || 'UNAUTHORIZED_DOOR_OPEN';
     warningMessage = 'Cửa mở trái phép.';
     severity = 'CRITICAL';
+    alertConditions.push({
+      alertType: 'UNAUTHORIZED_DOOR_OPEN',
+      severity: 'CRITICAL',
+      message: warningMessage,
+    });
+  }
+  if (normalizedConnection === 'OFFLINE' || rawOpState === 'OFFLINE') {
+    alertConditions.push({
+      alertType: 'MACHINE_OFFLINE',
+      severity: 'CRITICAL',
+      message: 'Máy báo trạng thái ngoại tuyến.',
+    });
+  }
+  if (errorCode && !isSensorFault && !isOutOfRange && !isUnauthorizedDoorOpen) {
+    alertConditions.push({
+      alertType: 'DEVICE_ERROR',
+      severity: 'WARNING',
+      message: `Thiết bị báo lỗi ${errorCode}.`,
+    });
   }
 
   const recorded = await Machine.recordSimulatorStatus(machine.id, {
-    connectionStatus: rawOpState === 'OFFLINE' ? 'OFFLINE' : 'ONLINE',
-    operationStatus:  isSensorFault ? 'ERROR' : rawOpState,
+    connectionStatus: normalizedConnection,
+    operationStatus:  normalizedConnection === 'OFFLINE' ? 'OFFLINE' : (isSensorFault ? 'ERROR' : rawOpState),
     healthStatus,
     doorStatus:       normalizedDoor,
     temperature:      parsedTemp,
@@ -574,6 +637,7 @@ const receiveSimulatorStatus = async (payload) => {
     eventType:        resolvedErrorCode ? 'ALERT' : 'TELEMETRY',
     severity,
     errorMessage:     warningMessage,
+    alertConditions,
   });
 
   return {
@@ -585,10 +649,73 @@ const receiveSimulatorStatus = async (payload) => {
   };
 };
 
+const receiveSimulatorConnectionStatus = async (payload) => {
+  const machineCode = typeof payload?.machineCode === 'string'
+    ? payload.machineCode.trim().toUpperCase()
+    : '';
+  const status = String(payload?.status || '').toUpperCase();
+  if (!machineCode || !['ONLINE', 'OFFLINE'].includes(status)) {
+    throw new ServiceError(400, 'INVALID_MACHINE_CONNECTION_STATUS', 'machineCode và status ONLINE/OFFLINE là bắt buộc.');
+  }
+  const machine = await Machine.findByCode(machineCode);
+  if (!machine) throw new ServiceError(404, 'MACHINE_NOT_FOUND', `Không tìm thấy máy '${machineCode}'.`);
+  const operationStatus = status === 'OFFLINE'
+    ? 'OFFLINE'
+    : (VALID_OPERATION_STATES.includes(payload.machineState) ? payload.machineState : 'IDLE');
+  const recorded = await Machine.recordSimulatorConnection(machine.id, {
+    connectionStatus: status,
+    operationStatus,
+  });
+  return { machineId: machine.id, machineCode, connectionStatus: status, status: recorded };
+};
+
+const receiveSimulatorAlert = async (payload) => {
+  const machineCode = typeof payload?.machineCode === 'string'
+    ? payload.machineCode.trim().toUpperCase()
+    : '';
+  const alertCode = typeof payload?.alertCode === 'string' ? payload.alertCode.trim().toUpperCase() : '';
+  const severity = typeof payload?.severity === 'string' ? payload.severity.trim().toUpperCase() : '';
+  const message = typeof payload?.message === 'string' ? payload.message.trim() : '';
+  if (!machineCode || !alertCode || !message
+      || !['INFO', 'WARNING', 'ERROR', 'CRITICAL'].includes(severity)) {
+    throw new ServiceError(400, 'INVALID_DEVICE_ALERT', 'Alert phải có machineCode, alertCode, severity và message hợp lệ.');
+  }
+  const machine = await Machine.findByCode(machineCode);
+  if (!machine) throw new ServiceError(404, 'MACHINE_NOT_FOUND', `Không tìm thấy máy '${machineCode}'.`);
+
+  const alertTypeByCode = {
+    TEMP_OUT_OF_RANGE: 'TEMPERATURE_OUT_OF_RANGE',
+    TEMP_LOCK: 'TEMPERATURE_OUT_OF_RANGE',
+    SENSOR_FAULT: 'SENSOR_FAULT',
+    DOOR_OPEN: 'UNAUTHORIZED_DOOR_OPEN',
+  };
+  await Machine.recordSimulatorStatus(machine.id, {
+    connectionStatus: 'ONLINE',
+    operationStatus: severity === 'CRITICAL' || severity === 'ERROR'
+      ? 'ERROR'
+      : (VALID_OPERATION_STATES.includes(machine.operationStatus) ? machine.operationStatus : 'IDLE'),
+    healthStatus: severity === 'CRITICAL' || severity === 'ERROR' ? 'ERROR' : 'WARNING',
+    doorStatus: machine.doorStatus || 'CLOSED',
+    temperature: machine.temperature,
+    humidity: machine.humidity,
+    errorCode: alertCode,
+    eventType: 'ALERT',
+    severity,
+    errorMessage: message,
+    alertConditions: [{
+      alertType: alertTypeByCode[alertCode] || alertCode,
+      severity,
+      message,
+    }],
+  });
+  return { machineId: machine.id, machineCode, alertCode, severity };
+};
+
 module.exports = {
   ServiceError,
   getAllMachines,
   getMachineById,
+  setDemoMachineRunning,
   getMachineSlots,
   checkMachineSlotInventoryConsistency,
   createMachineSlot,
@@ -596,4 +723,6 @@ module.exports = {
   resolveSlotsForOrderItems,
   getOrderDispensePlan,
   receiveSimulatorStatus,
+  receiveSimulatorConnectionStatus,
+  receiveSimulatorAlert,
 };

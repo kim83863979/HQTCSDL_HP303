@@ -79,6 +79,7 @@ function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-va
 
   // ── Vi phạm CHECK constraint ───────────────────────────────────────────────
   if (err.code === '23514') {
+    console.error('[ErrorHandler] CHECK violation:', err.constraint, err.message);
     return res.status(400).json({
       error: 'Bad Request',
       message: 'Dữ liệu không thỏa ràng buộc CHECK của bảng.',

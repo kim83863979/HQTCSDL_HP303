@@ -1,4 +1,5 @@
 const orderService = require('./order.service');
+const { AppError } = require('../products/product.errors');
 
 const handle = (action) => async (req, res, next) => {
   try {
@@ -17,11 +18,18 @@ const createOrder = handle(async (req) => ({
   data: await orderService.createOrder(req.body),
 }));
 
-const getOrder = handle((req) => orderService.getOrder(req.params.orderId));
+const getOrder = handle((req) => orderService.getOrder(
+  req.params.orderId,
+  req.get('x-guest-order-token'),
+));
 
 const createPaymentAttempt = handle(async (req) => ({
   _created: true,
-  data: await orderService.createPaymentAttempt(req.params.orderId, req.body?.paymentMethod),
+  data: await orderService.createPaymentAttempt(
+    req.params.orderId,
+    req.body?.paymentMethod,
+    req.get('x-guest-order-token'),
+  ),
 }));
 
 const processPaymentCallback = handle((req) => (
@@ -30,9 +38,12 @@ const processPaymentCallback = handle((req) => (
 
 const cancelOrder = handle((req) => orderService.cancelOrder(req.params.orderId));
 
-const recordDispenseResult = handle((req) => (
-  orderService.recordDispenseResult(req.params.orderId, req.body?.success)
-));
+const recordDispenseResult = handle((req) => {
+  if (req.body?.orderId !== req.params.orderId) {
+    throw new AppError(400, 'orderId trong payload phải khớp orderId trên URL.');
+  }
+  return orderService.processDispenseResult(req.body);
+});
 
 const expireOrders = handle(async () => ({
   expiredCount: await orderService.expireOrders(),

@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const request = require('supertest');
 
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
+process.env.IOT_DEVICE_SECRET = 'machine-test-iot-secret-32-bytes-minimum';
 
 const app = require('../app');
 const { pool } = require('../src/config/db');
@@ -32,8 +33,9 @@ before(async () => {
 after(() => pool.end());
 
 describe('Machines API', () => {
-  it('rejects machine queries without authentication', async () => {
-    await request(app).get('/api/machines').expect(401);
+  it('allows the public machine list for Client and protects machine details', async () => {
+    await request(app).get('/api/machines').expect(200);
+    await request(app).get(`/api/machines/${MACHINE_ID}`).expect(401);
   });
 
   it('lists machines', { skip: !hasDatabase }, async () => {
@@ -79,12 +81,21 @@ describe('Machines API', () => {
         sensorStatus: 'OK',
       });
 
-    if (process.env.IOT_DEVICE_SECRET) {
-      req.set('x-iot-key', process.env.IOT_DEVICE_SECRET);
-    }
+    req.set('x-iot-key', process.env.IOT_DEVICE_SECRET);
 
     const res = await req.expect(200);
     assert.equal(res.body.data.machineCode, 'VM001');
     assert.equal(res.body.data.operationStatus, 'IDLE');
+  });
+
+  it('rejects unauthenticated device status and result callbacks', async () => {
+    await request(app)
+      .post('/api/machines/simulator/status')
+      .send({ machineCode: 'VM001', machineState: 'IDLE', temperature: 4.5, humidity: 65 })
+      .expect(401);
+    await request(app)
+      .post('/api/orders/00000000-0000-0000-0000-000000000000/dispense-result')
+      .send({})
+      .expect(401);
   });
 });

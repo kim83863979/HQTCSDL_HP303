@@ -1,0 +1,2 @@
+# Chỉ cần khi chạy với broker MQTT thật. Unit test và `demo.py` (broker giả) không cần thư viện nào ngoài Python 3.9+.
+paho-mqtt>=2.0,<3.0

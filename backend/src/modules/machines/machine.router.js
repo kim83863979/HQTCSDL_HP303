@@ -12,7 +12,8 @@ const canViewMachines = [authenticateToken, requirePermissions("VIEW_MACHINE")];
 const canManageSlots = [authenticateToken, requireRoles("ADMIN", "OPERATOR")];
 
 // ─── Các endpoint Sprint 1 ────────────────────────────────────────────────────
-router.get("/", ...canViewMachines, machineController.getAllMachines);
+// Public read-only list for the customer-facing Vending Client demo.
+router.get("/", machineController.getAllMachines);
 router.post(
   "/simulator/status",
   verifyIotDevice,
@@ -44,6 +45,23 @@ router.patch(
   "/:id/slots/:slotId/status",
   ...canManageSlots,
   machineController.updateSlotStatus,
+);
+router.post(
+  "/:id/control",
+  ...canManageSlots,
+  machineController.sendControlCommand,
+);
+router.post(
+  "/:id/demo/start",
+  authenticateToken,
+  requireRoles("ADMIN"),
+  machineController.setDemoMachineRunning(true),
+);
+router.post(
+  "/:id/demo/stop",
+  authenticateToken,
+  requireRoles("ADMIN"),
+  machineController.setDemoMachineRunning(false),
 );
 
 // ─── Chi tiết máy và danh sách khe ────────────────────────────────────────────

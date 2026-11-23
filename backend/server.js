@@ -7,6 +7,10 @@ require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
 const app = require("./app");
 const { checkConnection } = require("./src/config/db");
+const { pool } = require("./src/config/db");
+const { MqttAdapter } = require("./src/modules/iot/mqtt.adapter");
+const dispenseService = require("./src/modules/iot/dispense.service");
+const machineDemo = require("./src/modules/machines/machine.demo");
 
 const PORT = process.env.APP_PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || "development";
@@ -33,23 +37,59 @@ async function start() {
     console.error("      → Mở DBeaver, thử kết nối lại.");
     console.error("   2. DATABASE_URL trong file .env có đúng không?");
     console.error(
-      `      → Hiện tại: ${process.env.DATABASE_URL || "(chưa cấu hình)"}`,
+      `      → Trạng thái: ${process.env.DATABASE_URL ? "đã cấu hình" : "chưa cấu hình"}`,
     );
     console.error('   3. Database "FreshVend" đã được tạo và import SQL chưa?');
     console.error(
-      "      → Xem: database/migrations/dump-FreshVend-202611011643.sql",
+      "      → Xem database/README.md để khôi phục baseline và chạy migrations.",
     );
     console.error("!".repeat(55) + "\n");
     process.exit(1); // dừng hẳn, không khởi động server
   }
 
+  let mqttAdapter = null;
+  if (process.env.MQTT_ENABLED !== "false") {
+    try {
+      mqttAdapter = new MqttAdapter();
+      mqttAdapter.start({
+        onTelemetry: dispenseService.receiveTelemetry,
+        onStatus: dispenseService.receiveConnectionStatus,
+        onDispenseResult: dispenseService.processDispenseResult,
+        onAlert: dispenseService.receiveAlert,
+        onControlResult: dispenseService.receiveControlResult,
+      });
+      dispenseService.start(mqttAdapter);
+    } catch (err) {
+      console.error("[MQTT] Configuration/startup failed:", err.message);
+      process.exitCode = 1;
+      await pool.end();
+      return;
+    }
+  }
+
   // ── 2. Khởi động HTTP server ─────────────────────────────────────────────────
-  app.listen(PORT, () => {
+  try {
+    await machineDemo.restore();
+  } catch (error) {
+    console.error('[MACHINE_DEMO] Could not restore saved demo state:', error);
+  }
+  const server = app.listen(PORT, () => {
     console.log("\n" + "=".repeat(55));
     console.log(`   Server đang chạy tại http://localhost:${PORT}`);
     console.log(`   Health check : http://localhost:${PORT}/health`);
     console.log("=".repeat(55) + "\n");
   });
+
+  const shutdown = async () => {
+    dispenseService.stop();
+    if (mqttAdapter) await mqttAdapter.stop();
+    server.close(async () => {
+      await pool.end();
+      process.exitCode = 0;
+    });
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
 }
 
 start();

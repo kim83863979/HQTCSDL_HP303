@@ -5,10 +5,19 @@
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
 const express = require("express");
+const path = require("node:path");
 const errorHandler = require("./src/middleware/errorHandler");
 const { checkConnection } = require("./src/config/db");
 
 const app = express();
+
+app.use(
+  '/uploads/products',
+  express.static(path.join(__dirname, 'uploads', 'products'), {
+    maxAge: '1d',
+    immutable: true,
+  }),
+);
 
 // ── Middleware toàn cục ───────────────────────────────────────────────────────
 app.use(express.json()); // parse JSON request body
@@ -31,7 +40,11 @@ app.get("/health", async (req, res, next) => {
 // ── Routes Sprint 1 ───────────────────────────────────────────────────────────
 app.use("/api/auth", require("./src/modules/auth/auth.router"));
 app.use("/api/admin", require("./src/modules/auth/admin.router"));
+app.use("/api/admin", require("./src/modules/products/admin.routes"));
+app.use("/api/admin", require("./src/modules/alerts/admin.routes"));
+app.use("/api/admin", require("./src/modules/reports/admin.routes"));
 app.use("/api/inventory", require("./src/router/inventory.router"));
+app.use("/api/inventory", require("./src/modules/inventory/admin.routes"));
 app.use("/api/machines", require("./src/modules/machines/machine.router"));
 
 // ── API modules ─────────────────────────────────────────────────────────────

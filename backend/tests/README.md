@@ -1,7 +1,8 @@
 # Kiểm thử backend
 
 Cài dependency trong `backend` bằng `npm install`, cấu hình `DATABASE_URL` và
-`JWT_SECRET` (nếu cần), sau đó chạy migration và dữ liệu seed của database.
+`JWT_SECRET` (nếu cần), khôi phục baseline database và chạy
+`npm run db:migrate` theo hướng dẫn tại `database/README.md`. Seed là tùy chọn.
 Chạy toàn bộ kiểm thử bằng `npm test`.
 
 Các test Products/Categories, Machines, Inventory và Auth cần PostgreSQL cùng

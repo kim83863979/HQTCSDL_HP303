@@ -291,6 +291,23 @@ const Machine = {
     };
   },
 
+  recordSimulatorConnection: async (machineId, { connectionStatus, operationStatus }) => {
+    const result = await pool.query(
+      `INSERT INTO public.machine_statuses
+         (machine_id, connection_status, operation_status, health_status,
+          door_status, last_seen_at)
+       VALUES ($1, $2, $3, 'NORMAL', 'CLOSED', CURRENT_TIMESTAMP)
+       ON CONFLICT (machine_id) DO UPDATE SET
+         connection_status = EXCLUDED.connection_status,
+         operation_status = EXCLUDED.operation_status,
+         last_seen_at = EXCLUDED.last_seen_at,
+         updated_at = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [machineId, connectionStatus, operationStatus],
+    );
+    return result.rows[0];
+  },
+
   /** [SPRINT 1] Ghi nhận trạng thái mới từ IoT Simulator. */
   recordSimulatorStatus: async (machineId, payload) => {
     const {
@@ -304,57 +321,119 @@ const Machine = {
       eventType       = 'TELEMETRY',
       severity        = 'INFO',
       errorMessage    = null,
+      alertConditions = [],
     } = payload;
-
-    const statusResult = await pool.query(
-      `INSERT INTO machine_statuses
-         (machine_id, connection_status, operation_status, health_status,
-          door_status, last_temperature, last_humidity, last_error_code,
-          last_seen_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
-       ON CONFLICT (machine_id) DO UPDATE SET
-         connection_status = EXCLUDED.connection_status,
-         operation_status = EXCLUDED.operation_status,
-         health_status = EXCLUDED.health_status,
-         door_status = EXCLUDED.door_status,
-         last_temperature = COALESCE(EXCLUDED.last_temperature, machine_statuses.last_temperature),
-         last_humidity = COALESCE(EXCLUDED.last_humidity, machine_statuses.last_humidity),
-         last_error_code = EXCLUDED.last_error_code,
-         last_seen_at = EXCLUDED.last_seen_at,
-         updated_at = CURRENT_TIMESTAMP
-       RETURNING *`,
-      [machineId, connectionStatus, operationStatus, healthStatus,
-       doorStatus, temperature, humidity, errorCode],
-    );
-
-    if (temperature !== null && temperature !== undefined) {
-      const isOutOfRange = payload.isOutOfRange ?? false;
-      const sensorStatus = healthStatus === 'ERROR' ? 'ERROR' : 'OK';
-      await pool.query(
-        `INSERT INTO temperature_logs
-           (machine_id, temperature, humidity, sensor_status, is_out_of_range,
-            recorded_at)
-         VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
-        [machineId, temperature, humidity, sensorStatus, isOutOfRange],
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        'SELECT machine_id FROM public.machines WHERE machine_id = $1 FOR UPDATE',
+        [machineId],
       );
-    }
-
-    if (errorCode || eventType === 'ALERT') {
-      const idempotencyKey = `SIM_${machineId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      await pool.query(
-        `INSERT INTO machine_events
-           (machine_id, event_type, severity, event_status,
-            error_code, error_message, idempotency_key, payload, occurred_at)
-         VALUES ($1, $2, $3, 'RECEIVED', $4, $5, $6, $7::jsonb, CURRENT_TIMESTAMP)`,
-        [
-          machineId, eventType, severity,
-          errorCode, errorMessage, idempotencyKey,
-          JSON.stringify({ operationStatus, temperature, humidity, doorStatus, errorCode }),
-        ],
+      const statusResult = await client.query(
+        `INSERT INTO machine_statuses
+           (machine_id, connection_status, operation_status, health_status,
+            door_status, last_temperature, last_humidity, last_error_code,
+            last_seen_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+         ON CONFLICT (machine_id) DO UPDATE SET
+           connection_status = EXCLUDED.connection_status,
+           operation_status = EXCLUDED.operation_status,
+           health_status = EXCLUDED.health_status,
+           door_status = EXCLUDED.door_status,
+           last_temperature = COALESCE(EXCLUDED.last_temperature, machine_statuses.last_temperature),
+           last_humidity = COALESCE(EXCLUDED.last_humidity, machine_statuses.last_humidity),
+           last_error_code = EXCLUDED.last_error_code,
+           last_seen_at = EXCLUDED.last_seen_at,
+           updated_at = CURRENT_TIMESTAMP
+         RETURNING *`,
+        [machineId, connectionStatus, operationStatus, healthStatus,
+         doorStatus, temperature, humidity, errorCode],
       );
-    }
 
-    return statusResult.rows[0];
+      if (temperature !== null && temperature !== undefined) {
+        const isOutOfRange = payload.isOutOfRange ?? false;
+        const sensorStatus = healthStatus === 'ERROR' ? 'ERROR' : 'OK';
+        await client.query(
+          `INSERT INTO temperature_logs
+             (machine_id, temperature, humidity, sensor_status, is_out_of_range,
+              recorded_at)
+           VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
+          [machineId, temperature, humidity, sensorStatus, isOutOfRange],
+        );
+      }
+
+      if (errorCode || eventType === 'ALERT') {
+        const idempotencyKey = `SIM_${machineId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        await client.query(
+          `INSERT INTO machine_events
+             (machine_id, event_type, severity, event_status,
+              error_code, error_message, idempotency_key, payload, occurred_at)
+           VALUES ($1, $2, $3, 'RECEIVED', $4, $5, $6, $7::jsonb, CURRENT_TIMESTAMP)`,
+          [
+            machineId, eventType, severity,
+            errorCode, errorMessage, idempotencyKey,
+            JSON.stringify({ operationStatus, temperature, humidity, doorStatus, errorCode }),
+          ],
+        );
+      }
+
+      const trackedAlertTypes = [
+        'SENSOR_FAULT',
+        'TEMPERATURE_OUT_OF_RANGE',
+        'UNAUTHORIZED_DOOR_OPEN',
+        'MACHINE_OFFLINE',
+        'DEVICE_ERROR',
+      ];
+      const activeTypes = alertConditions.map((condition) => condition.alertType);
+      for (const condition of alertConditions) {
+        const current = await client.query(
+          `SELECT alert_id
+           FROM public.alerts
+           WHERE machine_id = $1 AND alert_type = $2
+             AND status IN ('OPEN', 'ACKNOWLEDGED')
+           ORDER BY created_at DESC
+           LIMIT 1
+           FOR UPDATE`,
+          [machineId, condition.alertType],
+        );
+        if (current.rowCount) {
+          await client.query(
+            `UPDATE public.alerts
+             SET severity = $2, message = $3, updated_at = CURRENT_TIMESTAMP
+             WHERE alert_id = $1`,
+            [current.rows[0].alert_id, condition.severity, condition.message],
+          );
+        } else {
+          await client.query(
+            `INSERT INTO public.alerts (machine_id, alert_type, severity, message)
+             VALUES ($1, $2, $3, $4)`,
+            [machineId, condition.alertType, condition.severity, condition.message],
+          );
+        }
+      }
+      await client.query(
+        `UPDATE public.alerts
+         SET status = 'RESOLVED', resolved_at = CURRENT_TIMESTAMP,
+             resolved_by = NULL, updated_at = CURRENT_TIMESTAMP
+         WHERE machine_id = $1
+           AND alert_type = ANY($2::varchar[])
+           AND NOT (alert_type = ANY($3::varchar[]))
+           AND status IN ('OPEN', 'ACKNOWLEDGED')`,
+        [machineId, trackedAlertTypes, activeTypes],
+      );
+      await client.query('COMMIT');
+      return statusResult.rows[0];
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('[Machine] Telemetry rollback failed:', rollbackError.message);
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 };
 

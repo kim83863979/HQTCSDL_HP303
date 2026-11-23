@@ -6,6 +6,7 @@ const { pool } = require('../../config/db');
 
 const SELECT = `
   SELECT p.product_id, p.product_name, p.description, p.unit_price, p.status,
+         to_jsonb(p)->>'image_url' AS image_url,
          p.created_at, p.updated_at, c.category_id, c.category_name
   FROM products p
   JOIN categories c ON c.category_id = p.category_id`;
